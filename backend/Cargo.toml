@@ -1,0 +1,53 @@
+[package]
+name = "krown-backend"
+version = "0.1.0"
+edition = "2021"
+authors = ["Krown Team"]
+description = "Backend Rust pour Krown - Gestion centralisée de sessions SSH"
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+# Async runtime
+tokio = { version = "1.35", features = ["full"] }
+tokio-stream = "0.1"
+
+# SSH
+async-ssh2 = "0.1.2-beta"
+ssh2 = "0.9"
+
+# Web framework
+axum = { version = "0.7", features = ["ws", "multipart"] }
+tower = "0.4"
+tower-http = { version = "0.5", features = ["cors", "trace"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# Database
+sqlx = { version = "0.7", features = ["runtime-tokio-rustls", "sqlite", "postgres", "chrono", "uuid"] }
+
+# Configuration
+toml = "0.8"
+config = "0.14"
+
+# Security & Auth
+bcrypt = "0.15"
+jsonwebtoken = "9.2"
+argon2 = "0.5"
+
+# Utilities
+anyhow = "1.0"
+thiserror = "1.0"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json", "chrono"] }
+tracing-appender = "0.2"
+chrono = { version = "0.4", features = ["serde"] }
+uuid = { version = "1.6", features = ["v4", "serde"] }
+futures = "0.3"
+rand = "0.8"
+
+# WebSocket
+tokio-tungstenite = "0.21"
+
+[dev-dependencies]
+tokio-test = "0.4"
+

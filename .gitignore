@@ -1,0 +1,50 @@
+# Dependencies
+node_modules/
+frontend/node_modules/
+backend/target/
+backend/Cargo.lock
+
+# Build outputs
+frontend/dist/
+frontend/dist-ssr/
+backend/target/
+
+# Environment files
+.env
+.env.local
+.env.production
+backend/config.toml
+frontend/.env
+frontend/.env.local
+
+# Database
+*.db
+*.db-shm
+*.db-wal
+backend/krown.db
+
+# Logs
+*.log
+logs/
+backend/krown.log
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*.sublime-project
+*.sublime-workspace
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Rust
+**/*.rs.bk
+backend/target/
+
+# Temporary files
+*.tmp
+*.temp
