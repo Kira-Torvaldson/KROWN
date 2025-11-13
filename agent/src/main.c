@@ -11,6 +11,7 @@
 #include <unistd.h>
 #include <sys/socket.h>
 #include <sys/un.h>
+#include <sys/select.h>
 #include <signal.h>
 #include <errno.h>
 #include <pthread.h>
