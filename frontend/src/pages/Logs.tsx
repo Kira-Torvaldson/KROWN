@@ -40,7 +40,7 @@ export default function Logs() {
 
       return () => clearInterval(interval)
     }
-  }, [autoRefresh, lines, user])
+  }, [autoRefresh, lines])
 
   const downloadLogs = () => {
     const content = logs.join('\n')

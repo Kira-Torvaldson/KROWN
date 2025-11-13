@@ -64,7 +64,6 @@ export default function Terminal() {
         background: '#0f172a',
         foreground: '#f1f5f9',
         cursor: '#3b82f6',
-        selection: '#334155',
       },
       fontSize: 14,
       fontFamily: 'Monaco, Menlo, "Ubuntu Mono", monospace',

@@ -12,7 +12,7 @@ export type WebSocketMessage =
 
 export class WebSocketService {
   private ws: WebSocket | null = null
-  private streamWs: WebSocket | null = null
+  public streamWs: WebSocket | null = null
   private baseUrl: string
   private token: string | null = null
   private listeners: Map<string, Set<(data: any) => void>> = new Map()
@@ -84,12 +84,6 @@ export class WebSocketService {
     listeners.forEach((listener) => listener(message))
   }
 
-  private handleStreamMessage(message: any) {
-    const eventType = message.event || message.type
-    const listeners = this.listeners.get(eventType) || new Set()
-    listeners.forEach((listener) => listener(message))
-  }
-
   send(data: any) {
     if (this.ws?.readyState === WebSocket.OPEN) {
       this.ws.send(JSON.stringify(data))
@@ -116,10 +110,6 @@ export class WebSocketService {
     }
   }
 
-  get streamWs(): WebSocket | null {
-    return (this as any).streamWs
-  }
-
   ping() {
     this.send({ type: 'ping' })
   }
@@ -143,7 +133,9 @@ export class WebSocketService {
     this.streamWs.onmessage = (event) => {
       try {
         const message = JSON.parse(event.data)
-        this.handleStreamMessage(message)
+        const eventType = message.event || message.type
+        const listeners = this.listeners.get(eventType) || new Set()
+        listeners.forEach((listener) => listener(message))
       } catch (error) {
         console.error('Failed to parse stream message:', error)
       }
@@ -157,12 +149,6 @@ export class WebSocketService {
       console.log('WebSocket stream disconnected')
       this.attemptReconnectStream(sessionId)
     }
-  }
-
-  private handleStreamMessage(message: any) {
-    const eventType = message.event || message.type
-    const listeners = this.listeners.get(eventType) || new Set()
-    listeners.forEach((listener) => listener(message))
   }
 
   private attemptReconnectStream(sessionId: string) {

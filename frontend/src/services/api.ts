@@ -8,6 +8,8 @@ import type {
   LoginResponse,
   CreateSessionRequest,
   ExecuteCommandRequest,
+  CreateServerRequest,
+  UpdateServerRequest,
 } from '../types'
 
 // Use relative URL to leverage Vite proxy in development
