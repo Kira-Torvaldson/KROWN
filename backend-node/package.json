@@ -1,0 +1,29 @@
+{
+  "name": "krown-api",
+  "version": "1.0.0",
+  "description": "Krown API Server - Backend Node.js pour orchestration SSH",
+  "main": "server.js",
+  "type": "module",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js",
+    "test": "node test-agent.js"
+  },
+  "keywords": [
+    "ssh",
+    "krown",
+    "api"
+  ],
+  "author": "",
+  "license": "GPL-3.0",
+  "dependencies": {
+    "express": "^4.18.2",
+    "socket.io": "^4.6.1",
+    "cors": "^2.8.5",
+    "dotenv": "^16.3.1"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.1"
+  }
+}
+

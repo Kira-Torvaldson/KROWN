@@ -6,17 +6,17 @@
   "scripts": {
     "install": "npm run install:all",
     "install:all": "npm run install:frontend && npm run install:backend",
-    "install:backend": "powershell -ExecutionPolicy Bypass -File scripts/install-backend.ps1",
+    "install:backend": "cd backend-node && npm install",
     "install:frontend": "cd frontend && npm install",
     "dev": "npm-run-all --parallel dev:frontend dev:backend",
     "dev:frontend-only": "cd frontend && npm run dev",
-    "dev:backend": "powershell -ExecutionPolicy Bypass -File scripts/run-backend.ps1",
+    "dev:backend": "cd backend-node && npm run dev",
     "dev:frontend": "cd frontend && npm run dev",
     "build": "npm run build:backend && npm run build:frontend",
-    "build:backend": "cd backend && cargo build --release",
+    "build:backend": "cd backend-node && npm install",
     "build:frontend": "cd frontend && npm run build",
     "start": "npm-run-all --parallel start:backend start:frontend",
-    "start:backend": "cd backend && cargo run --release",
+    "start:backend": "cd backend-node && npm start",
     "start:frontend": "cd frontend && npm run preview"
   },
   "devDependencies": {

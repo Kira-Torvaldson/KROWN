@@ -1,19 +1,19 @@
 # Dependencies
 node_modules/
 frontend/node_modules/
-backend/target/
-backend/Cargo.lock
+backend-node/node_modules/
 
 # Build outputs
 frontend/dist/
 frontend/dist-ssr/
-backend/target/
+agent/build/
+agent/bin/
 
 # Environment files
 .env
 .env.local
 .env.production
-backend/config.toml
+backend-node/.env
 frontend/.env
 frontend/.env.local
 
@@ -21,12 +21,10 @@ frontend/.env.local
 *.db
 *.db-shm
 *.db-wal
-backend/krown.db
 
 # Logs
 *.log
 logs/
-backend/krown.log
 
 # IDE
 .vscode/
@@ -40,10 +38,6 @@ backend/krown.log
 .DS_Store
 Thumbs.db
 desktop.ini
-
-# Rust
-**/*.rs.bk
-backend/target/
 
 # Temporary files
 *.tmp
