@@ -43,7 +43,7 @@ export default function History() {
     // Note: L'API backend devrait avoir un endpoint pour récupérer les commandes
     // Pour l'instant, on simule avec les données disponibles
     try {
-      // TODO: Implémenter apiService.getCommandLogs(sessionId)
+      // À implémenter : apiService.getCommandLogs(sessionId)
       // const data = await apiService.getCommandLogs(sessionId)
       // setCommands(data)
     } catch (error) {

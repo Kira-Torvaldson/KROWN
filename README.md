@@ -598,6 +598,19 @@ npm run dev
 
 **Configuration HTTPS automatique** : En production avec Docker, le frontend active automatiquement HTTPS si les certificats sont présents dans `/etc/nginx/ssl/`. Sinon, il utilise HTTP avec un avertissement.
 
+#### Technologies utilisées
+
+- **React 18** avec TypeScript
+- **Vite** pour le build et le développement
+- **React Router** pour la navigation
+- **Axios** pour les requêtes API
+- **xterm.js** pour le terminal virtuel
+- **WebSocket natif** pour la communication temps réel
+- **Context API** pour le state management
+- **Lucide React** pour les icônes
+
+#### Fonctionnalités
+
 L'interface permet de :
 - **Gérer les serveurs SSH** : Ajouter, modifier, supprimer des serveurs avec authentification par mot de passe ou clé SSH
 - **Créer des sessions SSH** : Se connecter à un serveur configuré en un clic
@@ -607,6 +620,31 @@ L'interface permet de :
 - **Logs système** : Visualiser les logs de l'application
 
 **Format d'authentification** : Le frontend envoie `password` ou `private_key` directement dans la requête, selon la méthode d'authentification choisie lors de la configuration du serveur.
+
+#### Configuration
+
+Variables d'environnement (fichier `.env` dans `frontend/`) :
+
+```env
+VITE_API_URL=http://localhost:8080
+VITE_WS_URL=localhost:8080
+```
+
+#### Architecture Frontend
+
+**Structure des composants** :
+- `Layout` : Structure générale avec sidebar et navigation
+- `Dashboard` : Vue d'ensemble des serveurs et sessions
+- `ServerManager` : CRUD des serveurs SSH (stockage localStorage)
+- `Terminal` : Terminal SSH interactif avec xterm.js
+- `History` : Historique des sessions et commandes
+- `Logs` : Visualisation des logs système
+
+**Services** :
+- `apiService` : Client REST API avec intercepteurs
+- `wsService` : Gestion WebSocket avec reconnexion automatique
+
+**State Management** : Context API pour l'authentification, useState/useEffect pour le state local.
 
 ## Structure du projet
 
