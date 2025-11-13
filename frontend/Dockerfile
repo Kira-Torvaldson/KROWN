@@ -25,9 +25,8 @@ RUN ls -la && echo "=== Checking files ===" && \
     test -d src && echo "✓ src directory" || echo "✗ Missing files"
 
 # Build pour production
-# Utiliser npx pour s'assurer que les commandes locales sont utilisées
-RUN npx tsc --version && \
-    npm run build
+# Les commandes tsc et vite sont dans node_modules/.bin qui est dans le PATH de npm scripts
+RUN npm run build
 
 # Stage de production avec Nginx
 FROM nginx:alpine
