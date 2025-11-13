@@ -347,11 +347,16 @@ sudo certbot certonly --standalone -d votre-domaine.com
 
 ### Configuration Docker
 
-HTTPS est activé par défaut dans `docker-compose.yml` avec `USE_HTTPS=true`.
+**HTTPS automatique** : Le frontend active HTTPS automatiquement si les certificats sont montés dans le volume. Plus besoin de `USE_HTTPS=true` - la détection est automatique.
 
 **Ports exposés :**
 - **HTTP** : `http://localhost:8080` (backend), `http://localhost:3000` (frontend)
 - **HTTPS** : `https://localhost:8443` (backend), `https://localhost:3443` (frontend)
+
+**Comportement** :
+- Si les certificats sont présents → HTTPS activé automatiquement
+- Si les certificats sont absents → HTTP avec avertissement
+- Pour forcer HTTP : `USE_HTTP_ONLY=true`
 
 ### Configuration manuelle (sans Docker)
 
@@ -478,6 +483,8 @@ curl http://localhost:8080/api/ping
 
 #### Créer une session SSH
 
+**Avec authentification par mot de passe :**
+
 ```bash
 curl -X POST http://localhost:8080/api/sessions \
   -H "Content-Type: application/json" \
@@ -489,15 +496,34 @@ curl -X POST http://localhost:8080/api/sessions \
   }'
 ```
 
+**Avec authentification par clé SSH privée :**
+
+```bash
+curl -X POST http://localhost:8080/api/sessions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "host": "example.com",
+    "port": 22,
+    "username": "user",
+    "private_key": "-----BEGIN OPENSSH PRIVATE KEY-----\n..."
+  }'
+```
+
 Réponse :
 ```json
 {
-  "session_id": "session_0_1705056000",
-  "status": "connected",
+  "id": "session_0_1705056000",
+  "user_id": "system",
   "host": "example.com",
-  "port": 22
+  "port": 22,
+  "username": "user",
+  "status": "connected",
+  "created_at": "2025-01-12T10:30:00.000Z",
+  "updated_at": "2025-01-12T10:30:00.000Z"
 }
 ```
+
+**Note** : Le format de la requête accepte soit `password` soit `private_key` (pas les deux). Le backend transforme automatiquement la réponse de l'agent C pour correspondre au format `Session` attendu par le frontend.
 
 #### Lister les sessions
 
@@ -570,11 +596,17 @@ npm install
 npm run dev
 ```
 
+**Configuration HTTPS automatique** : En production avec Docker, le frontend active automatiquement HTTPS si les certificats sont présents dans `/etc/nginx/ssl/`. Sinon, il utilise HTTP avec un avertissement.
+
 L'interface permet de :
-- Gérer les serveurs SSH
-- Créer et gérer des sessions SSH
-- Exécuter des commandes via un terminal virtuel
-- Consulter l'historique des sessions
+- **Gérer les serveurs SSH** : Ajouter, modifier, supprimer des serveurs avec authentification par mot de passe ou clé SSH
+- **Créer des sessions SSH** : Se connecter à un serveur configuré en un clic
+- **Terminal virtuel** : Exécuter des commandes en temps réel via xterm.js
+- **WebSocket en temps réel** : Affichage des sorties SSH en direct
+- **Historique** : Consulter l'historique des sessions et commandes exécutées
+- **Logs système** : Visualiser les logs de l'application
+
+**Format d'authentification** : Le frontend envoie `password` ou `private_key` directement dans la requête, selon la méthode d'authentification choisie lors de la configuration du serveur.
 
 ## Structure du projet
 
