@@ -111,11 +111,17 @@ int main(int argc, char *argv[]) {
         }
         
         // Une connexion est en attente
+        // Vérifier que le socket est vraiment prêt
+        if (!FD_ISSET(server_fd, &read_fds)) {
+            continue;
+        }
+        
         int client_fd = socket_server_accept(server_fd);
         if (client_fd < 0) {
-            // EAGAIN/EWOULDBLOCK ne devrait plus se produire avec select()
-            // mais on gère quand même
-            if (errno != EAGAIN && errno != EWOULDBLOCK && running) {
+            // EAGAIN/EWOULDBLOCK peut se produire si la connexion est fermée
+            // entre select() et accept(), ou dans des cas de race condition
+            // On ignore silencieusement ces erreurs
+            if (errno != EAGAIN && errno != EWOULDBLOCK && errno != ECONNABORTED && running) {
                 perror("[Agent] Erreur accept");
             }
             continue;

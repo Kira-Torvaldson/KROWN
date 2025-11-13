@@ -75,7 +75,9 @@ int socket_server_accept(int server_fd) {
     
     int client_fd = accept(server_fd, (struct sockaddr *)&client_addr, &client_len);
     if (client_fd < 0) {
-        if (errno != EAGAIN && errno != EWOULDBLOCK) {
+        // EAGAIN/EWOULDBLOCK sont normaux pour un socket non-bloquant
+        // ECONNABORTED peut se produire si la connexion est fermée avant accept()
+        if (errno != EAGAIN && errno != EWOULDBLOCK && errno != ECONNABORTED) {
             perror("accept");
         }
         return -1;
