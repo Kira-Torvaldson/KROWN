@@ -7,10 +7,9 @@ WORKDIR /app
 COPY package.json package-lock.json* ./
 
 # Installer les dépendances (incluant devDependencies pour le build)
-# S'assurer que npx est disponible (inclus avec npm mais vérifions)
+# Corriger automatiquement les vulnérabilités si possible
 RUN npm ci && \
-    npm install -g npm@latest && \
-    which npx || npm install -g npx
+    npm audit fix --force || true
 
 # Copier le code source
 COPY . .

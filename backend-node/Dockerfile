@@ -13,7 +13,9 @@ WORKDIR /app
 COPY package.json ./
 
 # Installer les dépendances
-RUN npm install --production
+# Corriger automatiquement les vulnérabilités si possible
+RUN npm install --production && \
+    npm audit fix --force || true
 
 # Copier le code source
 COPY server.js ./
