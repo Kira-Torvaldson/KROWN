@@ -19,8 +19,10 @@ RUN ls -la && echo "=== Checking files ===" && \
     test -f tsconfig.json && echo "✓ tsconfig.json" && \
     test -d src && echo "✓ src directory" || echo "✗ Missing files"
 
-# Build pour production (avec affichage des erreurs détaillées)
-RUN npm run build
+# Build pour production (avec gestion d'erreurs TypeScript)
+# Note: Le build peut échouer si TypeScript trouve des erreurs
+# Pour voir les erreurs détaillées, exécutez: docker compose build frontend 2>&1 | grep -A 20 "error"
+RUN npm run build || (echo "=== BUILD FAILED ===" && npm run build 2>&1 | head -50 && exit 1)
 
 # Stage de production avec Nginx
 FROM nginx:alpine
