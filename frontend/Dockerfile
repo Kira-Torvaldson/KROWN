@@ -6,13 +6,20 @@ WORKDIR /app
 # Copier les fichiers de dépendances
 COPY package.json package-lock.json* ./
 
-# Installer les dépendances
+# Installer les dépendances (incluant devDependencies pour le build)
 RUN npm ci
 
 # Copier le code source
 COPY . .
 
-# Build pour production (avec gestion d'erreur)
+# Vérifier que les fichiers nécessaires existent
+RUN ls -la && echo "=== Checking files ===" && \
+    test -f package.json && echo "✓ package.json" && \
+    test -f vite.config.ts && echo "✓ vite.config.ts" && \
+    test -f tsconfig.json && echo "✓ tsconfig.json" && \
+    test -d src && echo "✓ src directory" || echo "✗ Missing files"
+
+# Build pour production (avec affichage des erreurs détaillées)
 RUN npm run build
 
 # Stage de production avec Nginx
