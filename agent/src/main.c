@@ -79,11 +79,42 @@ int main(int argc, char *argv[]) {
 
     printf("[Agent] Daemon prêt, en attente de commandes...\n");
 
-    // Boucle principale
+    // Boucle principale avec select() pour éviter les appels accept() inutiles
     while (running) {
+        fd_set read_fds;
+        struct timeval timeout;
+        
+        FD_ZERO(&read_fds);
+        FD_SET(server_fd, &read_fds);
+        
+        // Timeout de 1 seconde pour permettre la vérification de 'running'
+        timeout.tv_sec = 1;
+        timeout.tv_usec = 0;
+        
+        int select_result = select(server_fd + 1, &read_fds, NULL, NULL, &timeout);
+        
+        if (select_result < 0) {
+            if (errno == EINTR) {
+                // Interruption par signal, continuer
+                continue;
+            }
+            if (running) {
+                perror("[Agent] Erreur select");
+            }
+            continue;
+        }
+        
+        if (select_result == 0) {
+            // Timeout - pas de connexion en attente, continuer la boucle
+            continue;
+        }
+        
+        // Une connexion est en attente
         int client_fd = socket_server_accept(server_fd);
         if (client_fd < 0) {
-            if (running) {
+            // EAGAIN/EWOULDBLOCK ne devrait plus se produire avec select()
+            // mais on gère quand même
+            if (errno != EAGAIN && errno != EWOULDBLOCK && running) {
                 perror("[Agent] Erreur accept");
             }
             continue;
