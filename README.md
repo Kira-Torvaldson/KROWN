@@ -455,6 +455,32 @@ USE_HTTPS=false docker compose up
 
 ## Utilisation
 
+### Débogage et Logs
+
+Le backend Node.js et l'agent C génèrent des logs détaillés pour faciliter le débogage :
+
+**Logs du backend** :
+- `[API]` - Actions de l'API REST
+- `[Server]` - Configuration du serveur (HTTP/HTTPS)
+- `[WebSocket]` - Connexions WebSocket
+
+**Logs de l'agent C** :
+- `[Agent]` - État de l'agent
+- `[Socket]` - Communication socket Unix
+- `[SSH]` - Opérations SSH
+- `[Handler]` - Traitement des commandes
+
+**Consulter les logs** :
+```bash
+# Docker
+docker compose logs -f backend
+docker compose logs -f agent
+
+# Sans Docker
+# Backend : logs dans la console
+# Agent : logs dans la console ou journal systemd
+```
+
 ### API REST
 
 #### Health check
@@ -898,6 +924,71 @@ ldd agent/bin/krown-agent
 2. Vérifier l'URL dans `frontend/vite.config.ts`
 3. Vérifier les CORS dans `backend-node/server.js`
 4. Vérifier la console du navigateur pour les erreurs
+
+### Erreur 500 lors de la création d'une session SSH
+
+Si vous obtenez une erreur 500 lors de la création d'une session SSH :
+
+**1. Vérifier les logs du backend :**
+```bash
+# Avec Docker
+docker compose logs backend
+docker compose logs -f backend  # Suivre en temps réel
+
+# Sans Docker
+cd backend-node
+npm start
+# Les logs s'affichent dans la console
+```
+
+**2. Vérifier que l'agent C est démarré :**
+```bash
+# Avec Docker
+docker compose ps agent
+docker compose logs agent
+
+# Sans Docker
+ps aux | grep krown-agent
+ls -l /tmp/krown-agent.sock
+```
+
+**3. Tester la communication avec l'agent :**
+```bash
+# Avec Docker
+docker compose exec backend node test-agent.js
+
+# Sans Docker
+cd backend-node
+node test-agent.js
+```
+
+**4. Messages de log à surveiller :**
+
+Les logs du backend affichent maintenant des informations détaillées :
+- `[API] Tentative de connexion SSH:` - Paramètres de connexion
+- `[API] Agent non disponible` - L'agent n'est pas démarré
+- `[API] Envoi de la commande SSH_CONNECT à l'agent...` - Communication en cours
+- `[API] Réponse de l'agent:` - Réponse de l'agent C
+- `[API] Erreur de l'agent:` - Erreur retournée par l'agent
+
+**5. Causes courantes :**
+
+- **Agent non démarré** : `Agent SSH non disponible` → Démarrer l'agent
+- **Erreur de connexion SSH** : `Échec connexion: ...` → Vérifier host/port/credentials
+- **Erreur d'authentification** : `Échec authentification: ...` → Vérifier password/clé SSH
+- **Timeout** : `Timeout: L'agent n'a pas répondu` → L'agent est bloqué ou ne répond pas
+- **Socket inaccessible** : `Impossible de se connecter à l'agent` → Vérifier les permissions du socket
+
+**6. Réponses d'erreur enrichies :**
+
+L'API retourne maintenant des erreurs détaillées :
+```json
+{
+  "error": "Message d'erreur détaillé",
+  "code": 2,
+  "details": { ... }
+}
+```
 
 ### Erreur systemd : "status=217/USER"
 
