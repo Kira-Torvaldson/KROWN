@@ -236,6 +236,13 @@ npm install
 npm run install:all
 ```
 
+**Important** : Si vous démarrez manuellement le backend, assurez-vous d'avoir installé les dépendances :
+
+```bash
+cd backend-node
+npm install
+```
+
 #### 4. Compiler l'agent C
 
 ```bash
