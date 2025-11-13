@@ -183,9 +183,94 @@ response_code_t handle_ssh_connect(const char *json_data, char **response) {
             }
         }
     } else if (private_key && strlen(private_key) > 0) {
-        printf("[SSH] Méthode: clé privée (non implémentée)\n");
-        // TODO: Implémenter l'authentification par clé
-        rc = SSH_AUTH_ERROR;
+        printf("[SSH] Méthode: clé privée (longueur: %zu)\n", strlen(private_key));
+        
+        // Vérifier que le serveur accepte l'authentification par clé publique
+        if (!(auth_methods & SSH_AUTH_METHOD_PUBLICKEY)) {
+            printf("[SSH] ERREUR: Le serveur n'accepte pas l'authentification par clé publique\n");
+            char error_msg[256];
+            snprintf(error_msg, sizeof(error_msg), 
+                    "{\"error\":\"Le serveur SSH n'accepte pas l'authentification par clé publique\"}");
+            *response = strdup(error_msg);
+            ssh_disconnect(session);
+            ssh_free(session);
+            json_object_put(root);
+            return RESP_SSH_ERROR;
+        }
+        
+        // Créer un fichier temporaire pour la clé privée
+        char tmp_key_file[] = "/tmp/krown_ssh_key_XXXXXX";
+        int tmp_fd = mkstemp(tmp_key_file);
+        if (tmp_fd < 0) {
+            printf("[SSH] ERREUR: Impossible de créer un fichier temporaire pour la clé\n");
+            char error_msg[256];
+            snprintf(error_msg, sizeof(error_msg), 
+                    "{\"error\":\"Impossible de créer un fichier temporaire pour la clé privée\"}");
+            *response = strdup(error_msg);
+            ssh_disconnect(session);
+            ssh_free(session);
+            json_object_put(root);
+            return RESP_SSH_ERROR;
+        }
+        
+        // Écrire la clé privée dans le fichier temporaire
+        ssize_t written = write(tmp_fd, private_key, strlen(private_key));
+        close(tmp_fd);
+        
+        if (written != (ssize_t)strlen(private_key)) {
+            printf("[SSH] ERREUR: Impossible d'écrire la clé privée dans le fichier temporaire\n");
+            unlink(tmp_key_file);
+            char error_msg[256];
+            snprintf(error_msg, sizeof(error_msg), 
+                    "{\"error\":\"Impossible d'écrire la clé privée dans le fichier temporaire\"}");
+            *response = strdup(error_msg);
+            ssh_disconnect(session);
+            ssh_free(session);
+            json_object_put(root);
+            return RESP_SSH_ERROR;
+        }
+        
+        // Changer les permissions du fichier (lecture seule pour le propriétaire)
+        chmod(tmp_key_file, 0600);
+        
+        // Importer la clé privée
+        ssh_key privkey = NULL;
+        int import_rc = ssh_pki_import_privkey_file(tmp_key_file, NULL, NULL, NULL, &privkey);
+        
+        // Supprimer le fichier temporaire immédiatement après import
+        unlink(tmp_key_file);
+        
+        if (import_rc != SSH_OK || privkey == NULL) {
+            printf("[SSH] ERREUR: Impossible d'importer la clé privée: %s\n", 
+                   import_rc == SSH_OK ? "clé NULL" : ssh_get_error(session));
+            char error_msg[256];
+            snprintf(error_msg, sizeof(error_msg), 
+                    "{\"error\":\"Impossible d'importer la clé privée: format invalide ou clé corrompue\"}");
+            *response = strdup(error_msg);
+            ssh_disconnect(session);
+            ssh_free(session);
+            json_object_put(root);
+            return RESP_SSH_ERROR;
+        }
+        
+        // Authentifier avec la clé privée
+        rc = ssh_userauth_publickey(session, NULL, privkey);
+        
+        // Libérer la clé
+        ssh_key_free(privkey);
+        
+        if (rc == SSH_AUTH_SUCCESS) {
+            printf("[SSH] Authentification par clé privée réussie\n");
+        } else {
+            printf("[SSH] Échec authentification par clé privée: %s (code: %d)\n", 
+                   ssh_get_error(session), rc);
+            
+            if (rc == SSH_AUTH_DENIED) {
+                printf("[SSH] Accès refusé - la clé privée n'est peut-être pas autorisée sur le serveur\n");
+            } else if (rc == SSH_AUTH_PARTIAL) {
+                printf("[SSH] Authentification partielle - méthode supplémentaire requise\n");
+            }
+        }
     } else {
         printf("[SSH] Méthode: clé publique automatique\n");
         rc = ssh_userauth_publickey_auto(session, NULL, NULL);
