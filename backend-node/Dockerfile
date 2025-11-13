@@ -19,9 +19,9 @@ RUN npm install --production
 COPY server.js ./
 COPY agent-client.js ./
 
-# Créer un utilisateur non-root
-RUN addgroup -g 1000 nodeuser && \
-    adduser -D -u 1000 -G nodeuser nodeuser && \
+# Créer un utilisateur non-root (sans spécifier de GID/UID pour éviter les conflits)
+RUN addgroup -S nodeuser && \
+    adduser -S -G nodeuser nodeuser && \
     chown -R nodeuser:nodeuser /app
 
 USER nodeuser
