@@ -859,6 +859,31 @@ export USE_HTTPS=true
 
 ## Dépannage
 
+### Erreur : "Cannot find package 'express' imported from ..."
+
+Cette erreur indique que les dépendances npm du backend n'ont pas été installées.
+
+**Solution :**
+
+```bash
+# Depuis backend-node/
+cd backend-node
+npm install
+
+# Ou depuis la racine du projet
+npm run install:backend
+```
+
+**Vérifier l'installation :**
+
+```bash
+cd backend-node
+ls -la node_modules/express
+# Doit afficher le répertoire express
+```
+
+**Note** : Si vous utilisez Docker, les dépendances sont installées automatiquement lors du build. Cette erreur ne devrait se produire qu'en installation manuelle.
+
 ### Erreur : "Vite requires Node.js version 20.19+ or 22.12+"
 
 Vous utilisez Node.js 18.x mais Vite 7.x nécessite Node.js 20.19+ ou 22.12+.
