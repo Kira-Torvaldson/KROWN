@@ -313,6 +313,145 @@ app.post('/api/sessions/:id/execute', async (req, res) => {
     }
 });
 
+// Logs de l'agent
+app.get('/api/logs/agent', async (req, res) => {
+    try {
+        const lines = parseInt(req.query.lines) || 100;
+        
+        // En Docker, récupérer les logs du conteneur
+        if (process.env.DOCKER === 'true' || process.env.NODE_ENV === 'production') {
+            try {
+                const { stdout, stderr } = await execAsync(`docker logs --tail ${lines} krown-agent 2>&1 || echo "Conteneur non trouvé"`);
+                const logs = (stdout || stderr || '').trim();
+                if (logs && !logs.includes('Conteneur non trouvé')) {
+                    return res.json({
+                        source: 'docker',
+                        container: 'krown-agent',
+                        lines: lines,
+                        logs: logs.split('\n').filter(line => line.trim().length > 0)
+                    });
+                } else {
+                    return res.status(404).json({ 
+                        error: 'Conteneur krown-agent non trouvé',
+                        hint: 'Vérifiez que le conteneur est en cours d\'exécution: docker compose ps agent'
+                    });
+                }
+            } catch (error) {
+                console.error('[API] Erreur récupération logs Docker:', error.message);
+                return res.status(500).json({ 
+                    error: 'Impossible de récupérer les logs Docker',
+                    details: error.message,
+                    hint: 'Vérifiez que docker est accessible et que le conteneur krown-agent est en cours d\'exécution'
+                });
+            }
+        } else {
+            // En mode manuel, essayer de lire un fichier de log
+            const logFile = join(__dirname, '../agent/krown-agent.log');
+            if (existsSync(logFile)) {
+                const content = readFileSync(logFile, 'utf8');
+                const logLines = content.split('\n').filter(line => line.trim().length > 0);
+                const recentLogs = logLines.slice(-lines);
+                return res.json({
+                    source: 'file',
+                    file: logFile,
+                    lines: lines,
+                    logs: recentLogs
+                });
+            } else {
+                return res.status(404).json({ 
+                    error: 'Fichier de log introuvable',
+                    hint: 'Les logs de l\'agent ne sont pas disponibles en mode manuel sans fichier de log. Lancez l\'agent avec redirection: ./bin/krown-agent > krown-agent.log 2>&1'
+                });
+            }
+        }
+    } catch (error) {
+        console.error('[API] Erreur récupération logs agent:', error);
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// Logs du backend
+app.get('/api/logs/backend', async (req, res) => {
+    try {
+        const lines = parseInt(req.query.lines) || 100;
+        
+        // En Docker, récupérer les logs du conteneur
+        if (process.env.DOCKER === 'true' || process.env.NODE_ENV === 'production') {
+            try {
+                const { stdout, stderr } = await execAsync(`docker logs --tail ${lines} krown-api 2>&1 || echo ""`);
+                const logs = (stdout || stderr || '').trim();
+                return res.json({
+                    source: 'docker',
+                    container: 'krown-api',
+                    lines: lines,
+                    logs: logs.split('\n').filter(line => line.trim().length > 0)
+                });
+            } catch (error) {
+                console.error('[API] Erreur récupération logs Docker:', error.message);
+                return res.status(500).json({ 
+                    error: 'Impossible de récupérer les logs Docker'
+                });
+            }
+        } else {
+            // En mode manuel, retourner un message
+            return res.json({
+                source: 'console',
+                lines: lines,
+                logs: ['Les logs du backend sont disponibles dans la console'],
+                hint: 'En mode développement, les logs sont affichés dans la console'
+            });
+        }
+    } catch (error) {
+        console.error('[API] Erreur récupération logs backend:', error);
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// Tous les logs (agent + backend)
+app.get('/api/logs', async (req, res) => {
+    try {
+        const lines = parseInt(req.query.lines) || 100;
+        
+        // Récupérer les logs directement
+        let agentData = { logs: [], error: null };
+        let backendData = { logs: [], error: null };
+        
+        // Logs agent
+        try {
+            if (process.env.DOCKER === 'true' || process.env.NODE_ENV === 'production') {
+                const { stdout } = await execAsync(`docker logs --tail ${lines} krown-agent 2>&1 || echo ""`);
+                agentData.logs = (stdout || '').split('\n').filter(line => line.trim().length > 0);
+                agentData.source = 'docker';
+            }
+        } catch (error) {
+            agentData.error = error.message;
+        }
+        
+        // Logs backend
+        try {
+            if (process.env.DOCKER === 'true' || process.env.NODE_ENV === 'production') {
+                const { stdout } = await execAsync(`docker logs --tail ${lines} krown-api 2>&1 || echo ""`);
+                backendData.logs = (stdout || '').split('\n').filter(line => line.trim().length > 0);
+                backendData.source = 'docker';
+            } else {
+                backendData.logs = ['Les logs du backend sont disponibles dans la console'];
+                backendData.source = 'console';
+            }
+        } catch (error) {
+            backendData.error = error.message;
+        }
+        
+        return res.json({
+            agent: agentData,
+            backend: backendData,
+            timestamp: new Date().toISOString()
+        });
+    } catch (error) {
+        console.error('[API] Erreur récupération logs:', error);
+        res.status(500).json({ error: error.message });
+    }
+});
+
 // WebSocket
 io.on('connection', (socket) => {
     console.log(`[WebSocket] Client connecté: ${socket.id}`);
