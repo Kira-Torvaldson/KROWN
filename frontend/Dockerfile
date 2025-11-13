@@ -12,7 +12,7 @@ RUN npm ci
 # Copier le code source
 COPY . .
 
-# Build pour production
+# Build pour production (avec gestion d'erreur)
 RUN npm run build
 
 # Stage de production avec Nginx
