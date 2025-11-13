@@ -136,7 +136,14 @@ app.post('/api/sessions', async (req, res) => {
     try {
         const { host, port = 22, username, password, private_key } = req.body;
         
-        console.log('[API] Tentative de connexion SSH:', { host, port, username, hasPassword: !!password, hasKey: !!private_key });
+        console.log('[API] Tentative de connexion SSH:', { 
+            host, 
+            port, 
+            username, 
+            hasPassword: !!password, 
+            passwordLength: password ? password.length : 0,
+            hasKey: !!private_key 
+        });
         
         if (!host || !username) {
             return res.status(400).json({ error: 'host et username requis' });

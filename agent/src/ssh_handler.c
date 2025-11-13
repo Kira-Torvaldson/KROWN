@@ -139,8 +139,31 @@ response_code_t handle_ssh_connect(const char *json_data, char **response) {
     // Authentification
     printf("[SSH] Tentative d'authentification pour %s@%s:%d\n", username, host, port);
     
+    // Obtenir les méthodes d'authentification disponibles AVANT d'essayer
+    int auth_methods = ssh_userauth_list(session, username);
+    printf("[SSH] Méthodes d'authentification disponibles: ");
+    if (auth_methods & SSH_AUTH_METHOD_PUBLICKEY) printf("publickey ");
+    if (auth_methods & SSH_AUTH_METHOD_PASSWORD) printf("password ");
+    if (auth_methods & SSH_AUTH_METHOD_HOSTBASED) printf("hostbased ");
+    if (auth_methods & SSH_AUTH_METHOD_INTERACTIVE) printf("keyboard-interactive ");
+    printf("\n");
+    
     if (password && strlen(password) > 0) {
-        printf("[SSH] Méthode: mot de passe\n");
+        printf("[SSH] Méthode: mot de passe (longueur: %zu)\n", strlen(password));
+        
+        // Vérifier que le serveur accepte l'authentification par mot de passe
+        if (!(auth_methods & SSH_AUTH_METHOD_PASSWORD)) {
+            printf("[SSH] ERREUR: Le serveur n'accepte pas l'authentification par mot de passe\n");
+            char error_msg[256];
+            snprintf(error_msg, sizeof(error_msg), 
+                    "{\"error\":\"Le serveur SSH n'accepte pas l'authentification par mot de passe\"}");
+            *response = strdup(error_msg);
+            ssh_disconnect(session);
+            ssh_free(session);
+            json_object_put(root);
+            return RESP_SSH_ERROR;
+        }
+        
         rc = ssh_userauth_password(session, NULL, password);
         
         if (rc == SSH_AUTH_SUCCESS) {
@@ -148,6 +171,13 @@ response_code_t handle_ssh_connect(const char *json_data, char **response) {
         } else {
             printf("[SSH] Échec authentification par mot de passe: %s (code: %d)\n", 
                    ssh_get_error(session), rc);
+            
+            // Essayer d'obtenir plus d'informations sur l'erreur
+            if (rc == SSH_AUTH_DENIED) {
+                printf("[SSH] Accès refusé - le mot de passe est peut-être incorrect\n");
+            } else if (rc == SSH_AUTH_PARTIAL) {
+                printf("[SSH] Authentification partielle - méthode supplémentaire requise\n");
+            }
         }
     } else if (private_key && strlen(private_key) > 0) {
         printf("[SSH] Méthode: clé privée (non implémentée)\n");
