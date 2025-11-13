@@ -5,14 +5,16 @@ Système de gestion et supervision d'accès SSH avec interface web et API.
 ## 📋 Table des matières
 
 - [Architecture](#architecture)
-- [Prérequis](#prérequis)
-- [Installation](#installation)
-- [Démarrage rapide](#démarrage-rapide)
-- [Structure du projet](#structure-du-projet)
+- [Installation rapide avec Docker](#installation-rapide-avec-docker) ⭐ **Recommandé**
+- [Installation manuelle](#installation-manuelle)
+- [Configuration HTTPS](#configuration-https)
 - [Utilisation](#utilisation)
-- [Documentation technique](#documentation-technique)
-- [Sécurité](#sécurité)
+- [Structure du projet](#structure-du-projet)
+- [Développement](#développement)
+- [Déploiement en production](#déploiement-en-production)
 - [Dépannage](#dépannage)
+- [Sécurité](#sécurité)
+- [License](#license)
 
 ## Architecture
 
@@ -67,34 +69,148 @@ L'agent C écoute sur un socket Unix (`/tmp/krown-agent.sock`) et utilise un pro
 - `CMD_SSH_STATUS = 5` : Obtenir le statut d'une session
 - `CMD_LIST_SESSIONS = 6` : Lister toutes les sessions actives
 
-## Prérequis
+## Installation rapide avec Docker ⭐
 
-### Système
+**Recommandé** : Docker simplifie grandement le déploiement en évitant tous les problèmes de dépendances.
+
+### Prérequis Docker
+
+- **Docker** 20.10+
+- **Docker Compose** 2.0+
+
+```bash
+# Installer Docker (Linux)
+curl -fsSL https://get.docker.com -o get-docker.sh
+sudo sh get-docker.sh
+
+# Installer Docker Compose
+sudo apt-get install docker-compose-plugin
+
+# Vérifier
+docker --version
+docker compose version
+```
+
+### Démarrage en une commande
+
+```bash
+# 1. Générer les certificats SSL (première fois uniquement)
+cd backend-node
+chmod +x generate-certs.sh
+./generate-certs.sh
+cd ..
+
+# 2. Démarrer tous les services
+docker compose up --build
+```
+
+Cela démarre automatiquement :
+- **Agent C** : Daemon SSH
+- **Backend Node.js** : 
+  - HTTP sur `http://localhost:8080`
+  - HTTPS sur `https://localhost:8443`
+- **Frontend React** : 
+  - HTTP sur `http://localhost:3000` (redirige vers HTTPS)
+  - HTTPS sur `https://localhost:3443`
+
+### Commandes Docker utiles
+
+```bash
+# Lancer en arrière-plan
+docker compose up -d --build
+
+# Voir les logs
+docker compose logs -f
+
+# Voir les logs d'un service spécifique
+docker compose logs -f agent
+docker compose logs -f backend
+docker compose logs -f frontend
+
+# Arrêter
+docker compose down
+
+# Rebuild un service spécifique
+docker compose build --no-cache agent
+docker compose up -d agent
+
+# Nettoyer complètement
+docker compose down -v --rmi all
+```
+
+### Avantages Docker
+
+✅ **Pas besoin d'installer** libssh-dev, libjson-c-dev, Node.js, etc.  
+✅ **Environnement reproductible** - fonctionne partout où Docker tourne  
+✅ **Déploiement simple** - une seule commande : `docker compose up`  
+✅ **Isolation** - chaque composant dans son propre conteneur  
+✅ **Gestion des versions** - Node.js, libssh, etc. versionnés dans les images  
+
+### Mode développement avec Docker
+
+Créez `docker-compose.dev.yml` pour le hot-reload :
+
+```yaml
+version: '3.8'
+
+services:
+  backend:
+    volumes:
+      - ./backend-node:/app
+      - /app/node_modules
+    command: npm run dev
+    environment:
+      - NODE_ENV=development
+
+  frontend:
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    command: npm run dev
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=development
+```
+
+Puis :
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up
+```
+
+---
+
+## Installation manuelle
+
+### Prérequis
+
+#### Système
 
 - **Linux** (Debian/Kali/Parrot)
 - **GCC** et **Make**
-- **Node.js** 18+
+- **Node.js** 20.19+ ou 22.12+ (ou 18.x avec Vite 5.x)
 - **npm** 9+
 - **libssh-dev** et **libjson-c-dev**
 
-### Vérifier les versions
+#### Vérifier les versions
 
 ```bash
 gcc --version      # Doit être >= 7.0
-node --version     # Doit être >= 18.0
+node --version     # Doit être >= 20.19 ou 22.12 (ou 18.x avec Vite 5.x)
 npm --version      # Doit être >= 9.0
 ```
 
-## Installation
+### Installation
 
-### 1. Cloner le projet
+#### 1. Cloner le projet
 
 ```bash
 git clone https://github.com/Kira-Torvaldson/KROWN.git
 cd KROWN
 ```
 
-### 2. Installer les dépendances système
+#### 2. Installer les dépendances système
 
 **Ubuntu/Debian/Kali :**
 
@@ -108,7 +224,7 @@ sudo apt-get install -y \
     npm
 ```
 
-### 3. Installer les dépendances du projet
+#### 3. Installer les dépendances du projet
 
 Depuis la racine du projet :
 
@@ -120,7 +236,7 @@ npm install
 npm run install:all
 ```
 
-### 4. Compiler l'agent C
+#### 4. Compiler l'agent C
 
 ```bash
 cd agent
@@ -145,9 +261,9 @@ Vous devriez voir :
 [Agent] Daemon prêt, en attente de commandes...
 ```
 
-## Démarrage rapide
+### Démarrage rapide
 
-### Option A : Utiliser les scripts npm (recommandé)
+#### Option A : Utiliser les scripts npm (recommandé)
 
 Depuis la racine du projet :
 
@@ -161,7 +277,7 @@ Cela démarre :
 - **API Node.js** : `http://localhost:8080`
 - **Frontend React** : `http://localhost:3000`
 
-### Option B : Démarrer séparément
+#### Option B : Démarrer séparément
 
 ```bash
 # Terminal 1 - Agent C
@@ -177,7 +293,7 @@ cd frontend
 npm run dev
 ```
 
-### Option C : L'API démarre l'agent automatiquement
+#### Option C : L'API démarre l'agent automatiquement
 
 L'API Node.js détecte si l'agent n'est pas disponible et tente de le démarrer.
 
@@ -186,35 +302,150 @@ cd backend-node
 npm start
 ```
 
-## Structure du projet
+## Configuration HTTPS
 
+### Génération des certificats SSL
+
+#### Pour le développement (certificats auto-signés)
+
+```bash
+# Depuis backend-node/
+cd backend-node
+mkdir -p certs
+chmod +x generate-certs.sh
+./generate-certs.sh
 ```
-KROWN/
-├── agent/                 # Daemon C
-│   ├── src/
-│   │   ├── main.c        # Point d'entrée
-│   │   ├── socket_server.c  # Serveur socket Unix
-│   │   ├── ssh_handler.c    # Gestion SSH (libssh)
-│   │   └── request_handler.c # Traitement des requêtes
-│   ├── build/            # Fichiers compilés (ignoré par Git)
-│   ├── bin/              # Binaire final (ignoré par Git)
-│   └── Makefile
-│
-├── backend-node/         # API Node.js
-│   ├── server.js         # Serveur Express + Socket.io
-│   ├── agent-client.js   # Client pour communiquer avec l'agent C
-│   ├── test-agent.js     # Script de test
-│   └── package.json
-│
-├── frontend/             # Frontend React
-│   ├── src/
-│   ├── package.json
-│   └── vite.config.ts
-│
-├── package.json          # Scripts npm racine
-├── .gitignore
-├── .editorconfig
-└── README.md             # Ce fichier
+
+Ou manuellement :
+
+```bash
+cd backend-node
+mkdir -p certs
+
+openssl req -x509 -newkey rsa:4096 \
+    -nodes \
+    -keyout certs/key.pem \
+    -out certs/cert.pem \
+    -days 365 \
+    -subj "/C=FR/ST=State/L=City/O=Krown/CN=localhost" \
+    -addext "subjectAltName=DNS:localhost,DNS:*.localhost,IP:127.0.0.1"
+```
+
+#### Pour la production (Let's Encrypt)
+
+```bash
+# Installer certbot
+sudo apt-get install certbot
+
+# Générer les certificats
+sudo certbot certonly --standalone -d votre-domaine.com
+
+# Les certificats seront dans /etc/letsencrypt/live/votre-domaine.com/
+# - fullchain.pem (certificat)
+# - privkey.pem (clé privée)
+```
+
+### Configuration Docker
+
+HTTPS est activé par défaut dans `docker-compose.yml` avec `USE_HTTPS=true`.
+
+**Ports exposés :**
+- **HTTP** : `http://localhost:8080` (backend), `http://localhost:3000` (frontend)
+- **HTTPS** : `https://localhost:8443` (backend), `https://localhost:3443` (frontend)
+
+### Configuration manuelle (sans Docker)
+
+#### Backend Node.js
+
+```bash
+# 1. Générer les certificats
+cd backend-node
+./generate-certs.sh
+
+# 2. Activer HTTPS
+export USE_HTTPS=true
+npm start
+```
+
+Le backend écoutera sur :
+- HTTP : `http://localhost:8080`
+- HTTPS : `https://localhost:8443`
+
+#### Frontend (Nginx)
+
+Si vous utilisez Nginx manuellement :
+
+```bash
+# Copier les certificats
+sudo cp backend-node/certs/* /etc/nginx/ssl/
+
+# Utiliser nginx-https.conf
+sudo cp frontend/nginx-https.conf /etc/nginx/sites-available/krown
+sudo ln -s /etc/nginx/sites-available/krown /etc/nginx/sites-enabled/
+sudo nginx -t
+sudo systemctl reload nginx
+```
+
+### Avertissement navigateur (certificats auto-signés)
+
+Les certificats auto-signés génèrent un avertissement dans le navigateur. Pour le développement :
+
+1. Cliquez sur "Avancé" / "Advanced"
+2. Cliquez sur "Continuer vers localhost" / "Proceed to localhost"
+
+### Production avec Let's Encrypt
+
+#### 1. Obtenir les certificats
+
+```bash
+sudo certbot certonly --standalone -d votre-domaine.com
+```
+
+#### 2. Modifier docker-compose.yml
+
+```yaml
+backend:
+  volumes:
+    - /etc/letsencrypt/live/votre-domaine.com/fullchain.pem:/app/certs/cert.pem:ro
+    - /etc/letsencrypt/live/votre-domaine.com/privkey.pem:/app/certs/key.pem:ro
+
+frontend:
+  volumes:
+    - /etc/letsencrypt/live/votre-domaine.com/fullchain.pem:/etc/nginx/ssl/cert.pem:ro
+    - /etc/letsencrypt/live/votre-domaine.com/privkey.pem:/etc/nginx/ssl/key.pem:ro
+```
+
+#### 3. Renouvellement automatique
+
+Ajoutez un cron job pour renouveler les certificats :
+
+```bash
+# Éditer crontab
+sudo crontab -e
+
+# Ajouter (renouvellement mensuel)
+0 0 1 * * certbot renew --quiet && docker compose restart frontend backend
+```
+
+### Désactiver HTTPS
+
+Pour désactiver HTTPS temporairement :
+
+```yaml
+# Dans docker-compose.yml
+backend:
+  environment:
+    - USE_HTTPS=false
+
+frontend:
+  environment:
+    - USE_HTTPS=false
+```
+
+Ou en ligne de commande :
+
+```bash
+USE_HTTPS=false docker compose up
 ```
 
 ## Utilisation
@@ -305,7 +536,7 @@ Réponse :
 
 ### WebSocket
 
-Le serveur expose un WebSocket sur `ws://localhost:8080` avec les événements :
+Le serveur expose un WebSocket sur `ws://localhost:8080` (ou `wss://localhost:8443` en HTTPS) avec les événements :
 
 - `welcome` - Message de bienvenue
 - `session:connected` - Nouvelle session connectée
@@ -331,7 +562,7 @@ socket.emit('subscribe:session', 'session_123');
 
 ### Frontend React
 
-Le frontend React est disponible sur `http://localhost:3000` après avoir lancé :
+Le frontend React est disponible sur `http://localhost:3000` (ou `https://localhost:3443` en HTTPS) après avoir lancé :
 
 ```bash
 cd frontend
@@ -345,7 +576,43 @@ L'interface permet de :
 - Exécuter des commandes via un terminal virtuel
 - Consulter l'historique des sessions
 
-## Documentation technique
+## Structure du projet
+
+```
+KROWN/
+├── agent/                 # Daemon C
+│   ├── src/
+│   │   ├── main.c        # Point d'entrée
+│   │   ├── socket_server.c  # Serveur socket Unix
+│   │   ├── ssh_handler.c    # Gestion SSH (libssh)
+│   │   └── request_handler.c # Traitement des requêtes
+│   ├── build/            # Fichiers compilés (ignoré par Git)
+│   ├── bin/              # Binaire final (ignoré par Git)
+│   ├── Makefile
+│   └── COMPILE.md        # Guide de compilation
+│
+├── backend-node/         # API Node.js
+│   ├── server.js         # Serveur Express + Socket.io
+│   ├── agent-client.js   # Client pour communiquer avec l'agent C
+│   ├── https-server.js   # Configuration HTTPS
+│   ├── generate-certs.sh # Script génération certificats
+│   ├── test-agent.js     # Script de test
+│   ├── certs/            # Certificats SSL (ignoré par Git)
+│   └── package.json
+│
+├── frontend/             # Frontend React
+│   ├── src/
+│   ├── package.json
+│   └── vite.config.ts
+│
+├── docker-compose.yml    # Configuration Docker
+├── package.json          # Scripts npm racine
+├── .gitignore
+├── .editorconfig
+└── README.md             # Ce fichier
+```
+
+## Développement
 
 ### Scripts npm disponibles
 
@@ -415,21 +682,106 @@ Vous devriez voir :
 === Tests terminés ===
 ```
 
-## Sécurité
+## Déploiement en production
 
-⚠️ **Note** : Cette version est un PoC. Pour la production :
+### Compiler et installer l'agent
 
-- Chiffrer les communications socket Unix
-- Implémenter l'authentification utilisateur
-- Valider et sanitizer toutes les entrées
-- Utiliser des tokens d'authentification
-- Limiter les permissions du socket Unix (actuellement 0666)
-- Ne pas exposer l'agent directement sur le réseau
-- Utiliser HTTPS pour l'API en production
-- Ne jamais stocker les mots de passe en clair
-- Implémenter un système de rotation des clés SSH
+```bash
+cd agent
+make
+sudo make install  # Installe dans /usr/local/bin
+```
+
+### Créer un service systemd
+
+**Important** : Créez d'abord l'utilisateur si vous utilisez `User=krown` :
+
+```bash
+sudo useradd -r -s /bin/false krown
+```
+
+Créez `/etc/systemd/system/krown-agent.service` :
+
+```ini
+[Unit]
+Description=Krown SSH Agent
+After=network.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=krown
+Group=krown
+ExecStart=/usr/local/bin/krown-agent
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+# Sécurité
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/tmp
+
+# Limites
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Puis :
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable krown-agent
+sudo systemctl start krown-agent
+sudo systemctl status krown-agent
+```
+
+**Note** : Si vous obtenez l'erreur `status=217/USER`, l'utilisateur n'existe pas. Créez-le avec `sudo useradd -r -s /bin/false krown`.
+
+### Variables d'environnement
+
+Pour l'API Node.js, vous pouvez définir :
+
+```bash
+export PORT=8080
+export HTTPS_PORT=8443
+export AGENT_SOCKET=/tmp/krown-agent.sock
+export USE_HTTPS=true
+```
 
 ## Dépannage
+
+### Erreur : "Vite requires Node.js version 20.19+ or 22.12+"
+
+Vous utilisez Node.js 18.x mais Vite 7.x nécessite Node.js 20.19+ ou 22.12+.
+
+**Solution 1 : Mettre à jour Node.js (recommandé)**
+
+```bash
+# Avec nvm
+nvm install 22
+nvm use 22
+nvm alias default 22
+
+# Ou avec NodeSource
+curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
+sudo apt-get install -y nodejs
+```
+
+**Solution 2 : Utiliser Vite 5.x (compatible Node.js 18)**
+
+Le projet a été configuré pour utiliser Vite 5.x si vous restez sur Node.js 18 :
+
+```bash
+cd frontend
+rm -rf node_modules package-lock.json
+npm install
+```
 
 ### Erreur : "libssh.h: No such file or directory"
 
@@ -477,108 +829,130 @@ ldd agent/bin/krown-agent
 3. Vérifier les CORS dans `backend-node/server.js`
 4. Vérifier la console du navigateur pour les erreurs
 
+### Erreur systemd : "status=217/USER"
+
+L'utilisateur spécifié dans le service systemd n'existe pas.
+
+**Solution :**
+
+```bash
+# Créer l'utilisateur
+sudo useradd -r -s /bin/false krown
+
+# Ou modifier le service pour utiliser root (non recommandé)
+# User=root
+
+# Recharger systemd
+sudo systemctl daemon-reload
+sudo systemctl restart krown-agent
+```
+
+### Erreur systemd : "status=203/EXEC"
+
+Le binaire ne peut pas être exécuté par systemd.
+
+**Solution :**
+
+```bash
+# 1. Vérifier que le binaire existe
+ls -l /usr/local/bin/krown-agent
+
+# 2. Si absent, compiler et installer
+cd agent
+make
+sudo make install
+
+# 3. Vérifier les permissions
+sudo chmod +x /usr/local/bin/krown-agent
+
+# 4. Vérifier les dépendances
+ldd /usr/local/bin/krown-agent
+
+# 5. Tester manuellement
+/usr/local/bin/krown-agent
+
+# 6. Recharger systemd
+sudo systemctl daemon-reload
+sudo systemctl restart krown-agent
+```
+
+**Alternative :** Si le binaire n'est pas installé, utilisez le chemin complet dans le service :
+
+```ini
+ExecStart=/chemin/complet/vers/KROWN/agent/bin/krown-agent
+WorkingDirectory=/chemin/complet/vers/KROWN/agent
+```
+
 ### Erreurs de compilation de l'agent
 
 ```bash
-# Installer les dépendances manquantes
+# Installer toutes les dépendances
+cd agent
+make deps
+
+# Ou manuellement
 sudo apt-get install libssh-dev libjson-c-dev build-essential
 
 # Nettoyer et recompiler
-cd agent
 make clean
 make
+
+# Vérifier la compilation
+ls -l bin/krown-agent
+ldd bin/krown-agent
 ```
 
-## Installation en production
+**Erreurs courantes :**
 
-### Compiler et installer l'agent
+- `json-c/json.h: No such file` → `sudo apt-get install libjson-c-dev`
+- `libssh/libssh.h: No such file` → `sudo apt-get install libssh-dev`
+- `undefined reference` → Vérifiez que les bibliothèques sont dans LDFLAGS
+
+Voir [agent/COMPILE.md](agent/COMPILE.md) pour plus de détails.
+
+### Les conteneurs Docker ne démarrent pas
 
 ```bash
-cd agent
-make
-sudo make install  # Installe dans /usr/local/bin
+# Voir les logs
+docker compose logs
+
+# Vérifier les conteneurs
+docker compose ps
+
+# Rebuild depuis zéro
+docker compose down -v
+docker compose build --no-cache
+docker compose up
 ```
 
-### Créer un service systemd (optionnel)
-
-Créez `/etc/systemd/system/krown-agent.service` :
-
-```ini
-[Unit]
-Description=Krown SSH Agent
-After=network.target
-
-[Service]
-Type=simple
-User=krown
-ExecStart=/usr/local/bin/krown-agent
-Restart=always
-RestartSec=5
-
-[Install]
-WantedBy=multi-user.target
-```
-
-Puis :
+### Le backend Docker ne peut pas communiquer avec l'agent
 
 ```bash
-sudo systemctl enable krown-agent
-sudo systemctl start krown-agent
+# Vérifier que le volume est partagé
+docker compose exec backend ls -l /tmp/krown-agent.sock
+
+# Vérifier les permissions
+docker compose exec agent ls -l /tmp/krown-agent.sock
 ```
 
-### Variables d'environnement
+## Sécurité
 
-Pour l'API Node.js, vous pouvez définir :
+⚠️ **Note** : Cette version est un PoC. Pour la production :
 
-```bash
-export PORT=8080
-export AGENT_SOCKET=/tmp/krown-agent.sock
-```
-
-## Conteneurisation (Futur)
-
-L'architecture est préparée pour Docker :
-
-- **Agent C** : Image basée sur Debian avec libssh
-- **API Node.js** : Image Node.js Alpine
-- **Frontend** : Image Nginx pour servir les fichiers statiques
-
-## Développement
-
-### Workflow recommandé
-
-1. **Développement de l'agent C** :
-   ```bash
-   cd agent
-   # Modifier le code
-   make && ./bin/krown-agent
-   ```
-
-2. **Développement de l'API** :
-   ```bash
-   cd backend-node
-   npm run dev  # Rechargement automatique
-   ```
-
-3. **Développement du frontend** :
-   ```bash
-   cd frontend
-   npm run dev  # Rechargement automatique avec HMR
-   ```
-
-### Tests
-
-```bash
-# Tester l'agent
-cd backend-node && node test-agent.js
-
-# Tester l'API
-curl http://localhost:8080/api/health
-```
+- Chiffrer les communications socket Unix
+- Implémenter l'authentification utilisateur
+- Valider et sanitizer toutes les entrées
+- Utiliser des tokens d'authentification
+- Limiter les permissions du socket Unix (actuellement 0666)
+- Ne pas exposer l'agent directement sur le réseau
+- Utiliser HTTPS pour l'API en production
+- Ne jamais stocker les mots de passe en clair
+- Implémenter un système de rotation des clés SSH
+- Utiliser des certificats SSL signés par une CA (Let's Encrypt)
 
 ## License
 
-GPL-3.0
+GPL-3.0 - Voir [LICENSE](LICENSE) pour plus de détails.
 
 ## Contribution
 

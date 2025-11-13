@@ -1,0 +1,29 @@
+[Unit]
+Description=Krown SSH Agent
+After=network.target
+
+[Service]
+Type=simple
+# Option 1 : Utiliser root (simple mais moins sécurisé)
+User=root
+
+# Option 2 : Utiliser un utilisateur dédié (recommandé)
+# Créer d'abord : sudo useradd -r -s /bin/false krown
+# User=krown
+# Group=krown
+
+# Chemin du binaire (ajuster selon votre installation)
+ExecStart=/usr/local/bin/krown-agent
+
+# Ou utiliser le chemin complet si non installé :
+# ExecStart=/chemin/complet/vers/KROWN/agent/bin/krown-agent
+# WorkingDirectory=/chemin/complet/vers/KROWN/agent
+
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
+

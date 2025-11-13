@@ -15,13 +15,13 @@
 #include <errno.h>
 #include <pthread.h>
 #include <stdbool.h>
+#include <time.h>
+#include <sys/stat.h>
 
 #include "agent.h"
 #include "ssh_handler.h"
 #include "socket_server.h"
 #include "request_handler.h"
-#include <time.h>
-#include <sys/stat.h>
 
 // Variables globales
 static volatile bool running = true;
@@ -59,7 +59,11 @@ int main(int argc, char *argv[]) {
     printf("[Agent] Gestionnaire SSH initialisé\n");
 
     // Démarrer le serveur socket Unix
-    const char *socket_path = "/tmp/krown-agent.sock";
+    // Utiliser la variable d'environnement ou l'argument, sinon défaut
+    const char *socket_path = getenv("SOCKET_PATH");
+    if (!socket_path) {
+        socket_path = "/tmp/krown-agent.sock";
+    }
     if (argc > 1) {
         socket_path = argv[1];
     }

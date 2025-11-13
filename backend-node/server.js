@@ -14,12 +14,31 @@ import { spawn } from 'child_process';
 import { existsSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
+import { createHttpsServer } from './https-server.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 const app = express();
-const httpServer = createServer(app);
+
+// Créer le serveur HTTP ou HTTPS selon la configuration
+const USE_HTTPS = process.env.USE_HTTPS === 'true' || process.env.USE_HTTPS === '1';
+let httpServer;
+
+if (USE_HTTPS) {
+    const httpsServer = createHttpsServer(app);
+    if (httpsServer) {
+        httpServer = httpsServer;
+        console.log('[Server] Mode HTTPS activé');
+    } else {
+        httpServer = createServer(app);
+        console.warn('[Server] HTTPS demandé mais certificats introuvables, utilisation de HTTP');
+    }
+} else {
+    httpServer = createServer(app);
+    console.log('[Server] Mode HTTP (HTTPS désactivé)');
+}
+
 const io = new Server(httpServer, {
     cors: {
         origin: "*",
@@ -28,8 +47,9 @@ const io = new Server(httpServer, {
 });
 
 const PORT = process.env.PORT || 8080;
-const AGENT_SOCKET = '/tmp/krown-agent.sock';
-const AGENT_BINARY = join(__dirname, '../agent/bin/krown-agent');
+const HTTPS_PORT = process.env.HTTPS_PORT || 8443;
+const AGENT_SOCKET = process.env.AGENT_SOCKET || '/tmp/krown-agent.sock';
+const AGENT_BINARY = process.env.AGENT_BINARY || join(__dirname, '../agent/bin/krown-agent');
 
 // Middleware
 app.use(cors());
@@ -43,7 +63,21 @@ async function ensureAgentRunning() {
     if (!agentClient.isAvailable()) {
         console.log('[API] Agent non détecté, tentative de démarrage...');
         
-        if (existsSync(AGENT_BINARY)) {
+        // En Docker, l'agent est un service séparé, ne pas essayer de le démarrer
+        if (process.env.NODE_ENV === 'production' || process.env.DOCKER === 'true') {
+            console.log('[API] Mode Docker détecté, l\'agent doit être démarré séparément');
+            console.log('[API] Attente de l\'agent...');
+            
+            // Attendre que l'agent soit disponible (max 30 secondes)
+            for (let i = 0; i < 30; i++) {
+                await new Promise(resolve => setTimeout(resolve, 1000));
+                if (agentClient.isAvailable()) {
+                    console.log('[API] Agent détecté et disponible');
+                    return;
+                }
+            }
+            console.warn('[API] Agent non disponible après 30 secondes');
+        } else if (existsSync(AGENT_BINARY)) {
             const agent = spawn(AGENT_BINARY, [AGENT_SOCKET], {
                 detached: true,
                 stdio: 'ignore'
@@ -206,11 +240,16 @@ io.on('connection', (socket) => {
 async function start() {
     await ensureAgentRunning();
     
-    httpServer.listen(PORT, () => {
+    const isHttps = USE_HTTPS && httpServer instanceof https.Server;
+    const protocol = isHttps ? 'https' : 'http';
+    const wsProtocol = isHttps ? 'wss' : 'ws';
+    const listenPort = isHttps ? HTTPS_PORT : PORT;
+    
+    httpServer.listen(listenPort, () => {
         console.log('=== Krown API Server ===');
-        console.log(`[API] Serveur démarré sur http://localhost:${PORT}`);
+        console.log(`[API] Serveur démarré sur ${protocol}://localhost:${listenPort}`);
         console.log(`[API] Agent socket: ${AGENT_SOCKET}`);
-        console.log(`[API] WebSocket disponible sur ws://localhost:${PORT}`);
+        console.log(`[API] WebSocket disponible sur ${wsProtocol}://localhost:${listenPort}`);
     });
 }
 

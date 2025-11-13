@@ -1,0 +1,74 @@
+version: '3.8'
+
+services:
+  # Agent C - Daemon SSH
+  agent:
+    build:
+      context: ./agent
+      dockerfile: Dockerfile
+    container_name: krown-agent
+    volumes:
+      # Partager le socket Unix avec le backend
+      - agent-socket:/tmp
+    environment:
+      - SOCKET_PATH=/tmp/krown-agent.sock
+    restart: unless-stopped
+    networks:
+      - krown-network
+    # Le socket sera créé dans /tmp/krown-agent.sock
+
+  # Backend Node.js - API REST + WebSocket
+  backend:
+    build:
+      context: ./backend-node
+      dockerfile: Dockerfile
+    container_name: krown-api
+    ports:
+      - "8080:8080"
+      - "8443:8443"  # HTTPS
+    environment:
+      - PORT=8080
+      - HTTPS_PORT=8443
+      - AGENT_SOCKET=/tmp/krown-agent.sock
+      - NODE_ENV=production
+      - DOCKER=true
+      - USE_HTTPS=true
+    volumes:
+      # Accéder au socket Unix de l'agent
+      - agent-socket:/tmp
+      # Certificats SSL
+      - ./backend-node/certs:/app/certs:ro
+    depends_on:
+      - agent
+    restart: unless-stopped
+    networks:
+      - krown-network
+
+  # Frontend React - Interface web
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: krown-frontend
+    ports:
+      - "3000:80"
+      - "3443:443"  # HTTPS
+    environment:
+      - USE_HTTPS=true
+    volumes:
+      # Certificats SSL (partagés avec backend)
+      - ./backend-node/certs:/etc/nginx/ssl:ro
+    depends_on:
+      - backend
+    restart: unless-stopped
+    networks:
+      - krown-network
+
+volumes:
+  agent-socket:
+    driver: local
+
+networks:
+  krown-network:
+    driver: bridge
+

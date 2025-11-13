@@ -46,7 +46,7 @@ install: $(TARGET)
 deps:
 	@echo "Installing dependencies..."
 	sudo apt-get update
-	sudo apt-get install -y libssh-dev build-essential
+	sudo apt-get install -y libssh-dev libjson-c-dev build-essential
 
 .PHONY: all clean install deps
 
