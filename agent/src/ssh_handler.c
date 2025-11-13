@@ -110,7 +110,10 @@ response_code_t handle_ssh_connect(const char *json_data, char **response) {
     host = json_object_get_string(host_obj);
     username = json_object_get_string(user_obj);
     if (port_obj) port = json_object_get_int(port_obj);
-    if (pass_obj) password = json_object_get_string(pass_obj);
+    if (pass_obj) {
+        password = json_object_get_string(pass_obj);
+        printf("[SSH] Mot de passe reçu (longueur: %zu)\n", password ? strlen(password) : 0);
+    }
     if (key_obj) private_key = json_object_get_string(key_obj);
 
     // Créer la session SSH
