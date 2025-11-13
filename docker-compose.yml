@@ -36,6 +36,8 @@ services:
       - agent-socket:/tmp
       # Certificats SSL
       - ./backend-node/certs:/app/certs:ro
+      # Socket Docker pour accéder aux logs (optionnel)
+      - /var/run/docker.sock:/var/run/docker.sock:ro
     depends_on:
       - agent
     restart: unless-stopped
