@@ -145,9 +145,24 @@ app.post('/api/sessions', async (req, res) => {
         // Vérifier que l'agent est disponible
         if (!agentClient.isAvailable()) {
             console.error('[API] Agent non disponible pour la connexion SSH');
-            return res.status(503).json({ 
-                error: 'Agent SSH non disponible. Vérifiez que krown-agent est démarré.' 
-            });
+            console.error('[API] Socket attendu:', AGENT_SOCKET);
+            console.error('[API] Tentative de démarrage automatique de l\'agent...');
+            
+            // Tenter de démarrer l'agent automatiquement
+            await ensureAgentRunning();
+            
+            // Réessayer après un court délai
+            await new Promise(resolve => setTimeout(resolve, 2000));
+            
+            if (!agentClient.isAvailable()) {
+                return res.status(503).json({ 
+                    error: 'Agent SSH non disponible. Vérifiez que krown-agent est démarré.',
+                    socket_path: AGENT_SOCKET,
+                    hint: 'En Docker, vérifiez que le service agent est démarré: docker compose ps agent'
+                });
+            }
+            
+            console.log('[API] Agent maintenant disponible après démarrage automatique');
         }
 
         console.log('[API] Envoi de la commande SSH_CONNECT à l\'agent...');
