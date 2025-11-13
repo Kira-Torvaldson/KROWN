@@ -137,18 +137,55 @@ response_code_t handle_ssh_connect(const char *json_data, char **response) {
     }
 
     // Authentification
-    if (password) {
+    printf("[SSH] Tentative d'authentification pour %s@%s:%d\n", username, host, port);
+    
+    if (password && strlen(password) > 0) {
+        printf("[SSH] Méthode: mot de passe\n");
         rc = ssh_userauth_password(session, NULL, password);
-    } else if (private_key) {
+        
+        if (rc == SSH_AUTH_SUCCESS) {
+            printf("[SSH] Authentification par mot de passe réussie\n");
+        } else {
+            printf("[SSH] Échec authentification par mot de passe: %s (code: %d)\n", 
+                   ssh_get_error(session), rc);
+        }
+    } else if (private_key && strlen(private_key) > 0) {
+        printf("[SSH] Méthode: clé privée (non implémentée)\n");
         // TODO: Implémenter l'authentification par clé
         rc = SSH_AUTH_ERROR;
     } else {
+        printf("[SSH] Méthode: clé publique automatique\n");
         rc = ssh_userauth_publickey_auto(session, NULL, NULL);
+        
+        if (rc == SSH_AUTH_SUCCESS) {
+            printf("[SSH] Authentification par clé publique réussie\n");
+        } else {
+            printf("[SSH] Échec authentification par clé publique: %s (code: %d)\n", 
+                   ssh_get_error(session), rc);
+        }
     }
 
     if (rc != SSH_AUTH_SUCCESS) {
-        char error_msg[256];
-        snprintf(error_msg, sizeof(error_msg), "{\"error\":\"Échec authentification: %s\"}", ssh_get_error(session));
+        const char *error_str = ssh_get_error(session);
+        char error_msg[512];
+        
+        // Obtenir plus de détails sur l'erreur
+        int auth_methods = ssh_userauth_list(session, username);
+        char methods_str[128] = "";
+        if (auth_methods & SSH_AUTH_METHOD_PUBLICKEY) strcat(methods_str, "publickey,");
+        if (auth_methods & SSH_AUTH_METHOD_PASSWORD) strcat(methods_str, "password,");
+        if (auth_methods & SSH_AUTH_METHOD_HOSTBASED) strcat(methods_str, "hostbased,");
+        if (auth_methods & SSH_AUTH_METHOD_INTERACTIVE) strcat(methods_str, "keyboard-interactive,");
+        
+        // Retirer la virgule finale
+        size_t len = strlen(methods_str);
+        if (len > 0 && methods_str[len-1] == ',') {
+            methods_str[len-1] = '\0';
+        }
+        
+        snprintf(error_msg, sizeof(error_msg), 
+                "{\"error\":\"Échec authentification: %s\",\"auth_methods_available\":\"%s\",\"auth_code\":%d}", 
+                error_str, methods_str, rc);
         *response = strdup(error_msg);
         ssh_disconnect(session);
         ssh_free(session);
