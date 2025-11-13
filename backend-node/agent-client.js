@@ -35,6 +35,12 @@ export class AgentClient {
             }
 
             const client = createConnection(this.socketPath);
+            
+            // Gestion des erreurs de connexion
+            client.on('error', (err) => {
+                console.error('[AgentClient] Erreur de connexion au socket:', err.message);
+                reject(new Error(`Impossible de se connecter à l'agent: ${err.message}`));
+            });
 
             client.on('connect', () => {
                 // Préparer la commande

@@ -136,11 +136,24 @@ app.post('/api/sessions', async (req, res) => {
     try {
         const { host, port = 22, username, password, private_key } = req.body;
         
+        console.log('[API] Tentative de connexion SSH:', { host, port, username, hasPassword: !!password, hasKey: !!private_key });
+        
         if (!host || !username) {
             return res.status(400).json({ error: 'host et username requis' });
         }
 
+        // Vérifier que l'agent est disponible
+        if (!agentClient.isAvailable()) {
+            console.error('[API] Agent non disponible pour la connexion SSH');
+            return res.status(503).json({ 
+                error: 'Agent SSH non disponible. Vérifiez que krown-agent est démarré.' 
+            });
+        }
+
+        console.log('[API] Envoi de la commande SSH_CONNECT à l\'agent...');
         const result = await agentClient.sshConnect(host, port, username, password, private_key);
+        
+        console.log('[API] Réponse de l\'agent:', { code: result.code, data: result.data });
         
         if (result.code === 0) {
             // Transformer la réponse de l'agent pour correspondre au format Session
@@ -156,16 +169,27 @@ app.post('/api/sessions', async (req, res) => {
                 updated_at: new Date().toISOString()
             };
             
+            console.log('[API] Session créée avec succès:', session.id);
+            
             // Émettre un événement WebSocket
             io.emit('session:connected', session);
             res.json(session);
         } else {
             const errorMsg = result.data?.error || 'Erreur connexion SSH';
-            res.status(500).json({ error: errorMsg });
+            console.error('[API] Erreur de l\'agent:', { code: result.code, error: errorMsg });
+            res.status(500).json({ 
+                error: errorMsg,
+                code: result.code,
+                details: result.data 
+            });
         }
     } catch (error) {
         console.error('[API] Erreur création session:', error);
-        res.status(500).json({ error: error.message });
+        console.error('[API] Stack trace:', error.stack);
+        res.status(500).json({ 
+            error: error.message || 'Erreur interne lors de la création de la session',
+            type: error.constructor.name
+        });
     }
 });
 
