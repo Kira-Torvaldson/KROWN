@@ -15,14 +15,15 @@ RUN npm install -g npm@latest
 # Copier les fichiers de dépendances
 COPY package.json ./
 
-# Installer les dépendances
+# Installer les dépendances (production + dev pour le développement)
 # Corriger automatiquement les vulnérabilités si possible
-RUN npm install --production && \
+RUN npm install && \
     npm audit fix || true
 
 # Copier le code source
 COPY server.js ./
 COPY agent-client.js ./
+COPY https-server.js ./
 
 # Créer un utilisateur non-root (sans spécifier de GID/UID pour éviter les conflits)
 RUN addgroup -S nodeuser && \
