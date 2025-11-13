@@ -63,6 +63,12 @@ export class AgentClient {
             let responseBuffer = Buffer.alloc(0);
             let headerRead = false;
             let expectedDataLen = 0;
+            
+            // Timeout pour éviter les blocages (30 secondes)
+            const timeout = setTimeout(() => {
+                client.destroy();
+                reject(new Error('Timeout: L\'agent n\'a pas répondu dans les 30 secondes'));
+            }, 30000);
 
             client.on('data', (data) => {
                 responseBuffer = Buffer.concat([responseBuffer, data]);
@@ -74,6 +80,7 @@ export class AgentClient {
                     expectedDataLen = responseBuffer.readUInt32LE(8);
 
                     if (version !== PROTOCOL_VERSION) {
+                        clearTimeout(timeout);
                         client.destroy();
                         reject(new Error(`Version de protocole invalide: ${version}`));
                         return;
@@ -84,6 +91,7 @@ export class AgentClient {
 
                     // Si pas de données, terminer
                     if (expectedDataLen === 0) {
+                        clearTimeout(timeout);
                         client.end();
                         resolve({ code, data: null });
                         return;
@@ -92,6 +100,7 @@ export class AgentClient {
 
                 // Si on a tout reçu
                 if (headerRead && responseBuffer.length >= expectedDataLen) {
+                    clearTimeout(timeout);
                     const jsonData = responseBuffer.toString('utf8', 0, expectedDataLen);
                     try {
                         const parsed = JSON.parse(jsonData);
@@ -105,12 +114,15 @@ export class AgentClient {
             });
 
             client.on('error', (err) => {
-                reject(err);
+                clearTimeout(timeout);
+                console.error('[AgentClient] Erreur socket:', err.message);
+                reject(new Error(`Erreur de communication avec l'agent: ${err.message}`));
             });
 
             client.on('close', () => {
+                clearTimeout(timeout);
                 if (!headerRead) {
-                    reject(new Error('Connexion fermée avant réception complète'));
+                    reject(new Error('Connexion fermée avant réception complète de la réponse'));
                 }
             });
         });
