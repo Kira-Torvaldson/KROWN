@@ -32,14 +32,27 @@ RUN make clean && \
 RUN useradd -r -s /bin/false krown && \
     chown -R krown:krown /app
 
+# Créer le répertoire pour les logs (optionnel)
+RUN mkdir -p /var/log/krown && \
+    chown krown:krown /var/log/krown
+
 # Exposer le socket (sera monté comme volume)
 VOLUME ["/tmp"]
 
 # Utilisateur non-root
 USER krown
 
+# Script d'entrée pour initialisation du daemon
+RUN echo '#!/bin/sh' > /docker-entrypoint.sh && \
+    echo 'echo "=== Krown Agent Daemon ==="' >> /docker-entrypoint.sh && \
+    echo 'echo "[Agent] Démarrage du daemon SSH..."' >> /docker-entrypoint.sh && \
+    echo 'echo "[Agent] Socket: ${SOCKET_PATH:-/tmp/krown-agent.sock}"' >> /docker-entrypoint.sh && \
+    echo 'echo "[Agent] Daemon prêt"' >> /docker-entrypoint.sh && \
+    echo '' >> /docker-entrypoint.sh && \
+    echo 'exec ./bin/krown-agent "$@"' >> /docker-entrypoint.sh && \
+    chmod +x /docker-entrypoint.sh
+
 # Point d'entrée
-# Le socket sera passé comme argument ou utilisé par défaut
-ENTRYPOINT ["./bin/krown-agent"]
+ENTRYPOINT ["/docker-entrypoint.sh"]
 CMD []
 
