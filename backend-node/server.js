@@ -142,13 +142,28 @@ app.post('/api/sessions', async (req, res) => {
         const result = await agentClient.sshConnect(host, port, username, password, private_key);
         
         if (result.code === 0) {
+            // Transformer la réponse de l'agent pour correspondre au format Session
+            const agentData = result.data || {};
+            const session = {
+                id: agentData.session_id || `session_${Date.now()}`,
+                user_id: 'system', // Pas d'authentification pour le moment
+                host: agentData.host || host,
+                port: agentData.port || port,
+                username: username,
+                status: agentData.status || 'connected',
+                created_at: new Date().toISOString(),
+                updated_at: new Date().toISOString()
+            };
+            
             // Émettre un événement WebSocket
-            io.emit('session:connected', result.data);
-            res.json(result.data);
+            io.emit('session:connected', session);
+            res.json(session);
         } else {
-            res.status(500).json(result.data || { error: 'Erreur connexion SSH' });
+            const errorMsg = result.data?.error || 'Erreur connexion SSH';
+            res.status(500).json({ error: errorMsg });
         }
     } catch (error) {
+        console.error('[API] Erreur création session:', error);
         res.status(500).json({ error: error.message });
     }
 });
@@ -156,7 +171,21 @@ app.post('/api/sessions', async (req, res) => {
 app.get('/api/sessions', async (req, res) => {
     try {
         const result = await agentClient.listSessions();
-        res.json(result.data || { sessions: [] });
+        const agentData = result.data || { sessions: [] };
+        
+        // Transformer les sessions pour correspondre au format attendu
+        const sessions = (agentData.sessions || []).map(s => ({
+            id: s.id || s.session_id,
+            user_id: 'system',
+            host: s.host || 'unknown',
+            port: s.port || 22,
+            username: s.username || 'unknown',
+            status: s.status || 'connected',
+            created_at: s.created_at ? new Date(s.created_at * 1000).toISOString() : new Date().toISOString(),
+            updated_at: new Date().toISOString()
+        }));
+        
+        res.json(sessions);
     } catch (error) {
         res.status(500).json({ error: error.message });
     }
@@ -166,7 +195,25 @@ app.get('/api/sessions/:id', async (req, res) => {
     try {
         const { id } = req.params;
         const result = await agentClient.sshStatus(id);
-        res.json(result.data || { status: 'not_found' });
+        const agentData = result.data || {};
+        
+        if (agentData.status === 'not_found') {
+            return res.status(404).json({ error: 'Session non trouvée' });
+        }
+        
+        // Transformer pour correspondre au format Session
+        const session = {
+            id: id,
+            user_id: 'system',
+            host: agentData.host || 'unknown',
+            port: agentData.port || 22,
+            username: agentData.username || 'unknown',
+            status: agentData.status || 'connected',
+            created_at: agentData.created_at ? new Date(agentData.created_at * 1000).toISOString() : new Date().toISOString(),
+            updated_at: new Date().toISOString()
+        };
+        
+        res.json(session);
     } catch (error) {
         res.status(500).json({ error: error.message });
     }

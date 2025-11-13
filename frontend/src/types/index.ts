@@ -54,10 +54,8 @@ export interface CreateSessionRequest {
   host: string
   port?: number
   username: string
-  auth_method: {
-    Password?: { password: string }
-    Key?: { private_key: string; passphrase?: string }
-  }
+  password?: string
+  private_key?: string
 }
 
 export interface ExecuteCommandRequest {

@@ -31,20 +31,20 @@ export default function ServerManager() {
   const handleCreateSession = async (server: Server) => {
     setLoading(true)
     try {
-      const authMethod = server.authMethod === 'password'
-        ? { Password: { password: server.password || '' } }
-        : { Key: { private_key: server.privateKey || '', passphrase: server.passphrase } }
-
+      // Le backend attend password et private_key directement dans le body
       const session = await apiService.createSession({
         host: server.host,
         port: server.port,
         username: server.username,
-        auth_method: authMethod,
+        password: server.authMethod === 'password' ? server.password : undefined,
+        private_key: server.authMethod === 'key' ? server.privateKey : undefined,
       })
 
       navigate(`/terminal/${session.id}`)
     } catch (error: any) {
-      alert(error.response?.data?.error || 'Erreur lors de la création de la session')
+      const errorMessage = error.response?.data?.error || error.message || 'Erreur lors de la création de la session'
+      console.error('Erreur création session:', error)
+      alert(errorMessage)
     } finally {
       setLoading(false)
     }
