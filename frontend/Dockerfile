@@ -7,7 +7,8 @@ WORKDIR /app
 COPY package.json package-lock.json* ./
 
 # Installer les dépendances (incluant devDependencies pour le build)
-RUN npm ci
+RUN npm ci && \
+    npm list typescript || npm install typescript
 
 # Copier le code source
 COPY . .
@@ -19,10 +20,10 @@ RUN ls -la && echo "=== Checking files ===" && \
     test -f tsconfig.json && echo "✓ tsconfig.json" && \
     test -d src && echo "✓ src directory" || echo "✗ Missing files"
 
-# Build pour production (avec gestion d'erreurs TypeScript)
-# Note: Le build peut échouer si TypeScript trouve des erreurs
-# Pour voir les erreurs détaillées, exécutez: docker compose build frontend 2>&1 | grep -A 20 "error"
-RUN npm run build || (echo "=== BUILD FAILED ===" && npm run build 2>&1 | head -50 && exit 1)
+# Build pour production
+# Utiliser npx pour s'assurer que les commandes locales sont utilisées
+RUN npx tsc --version && \
+    npm run build
 
 # Stage de production avec Nginx
 FROM nginx:alpine
