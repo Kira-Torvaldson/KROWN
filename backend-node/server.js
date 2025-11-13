@@ -11,11 +11,14 @@ import https from 'https';
 import { Server } from 'socket.io';
 import cors from 'cors';
 import { AgentClient } from './agent-client.js';
-import { spawn } from 'child_process';
-import { existsSync } from 'fs';
+import { spawn, exec } from 'child_process';
+import { existsSync, readFileSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
+import { promisify } from 'util';
 import { createHttpsServer } from './https-server.js';
+
+const execAsync = promisify(exec);
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
