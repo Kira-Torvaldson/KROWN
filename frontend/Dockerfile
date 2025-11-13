@@ -43,18 +43,25 @@ COPY nginx-https.conf /etc/nginx/conf.d/default-https.conf
 
 # Script d'entrée - HTTPS par défaut en production
 RUN echo '#!/bin/sh' > /docker-entrypoint.sh && \
+    echo '# Supprimer toutes les configurations existantes' >> /docker-entrypoint.sh && \
+    echo 'rm -f /etc/nginx/conf.d/default.conf' >> /docker-entrypoint.sh && \
+    echo '' >> /docker-entrypoint.sh && \
     echo '# HTTPS par défaut si les certificats sont disponibles' >> /docker-entrypoint.sh && \
     echo 'if [ -f /etc/nginx/ssl/cert.pem ] && [ -f /etc/nginx/ssl/key.pem ]; then' >> /docker-entrypoint.sh && \
     echo '  cp /etc/nginx/conf.d/default-https.conf /etc/nginx/conf.d/default.conf' >> /docker-entrypoint.sh && \
+    echo '  rm -f /etc/nginx/conf.d/default-http.conf' >> /docker-entrypoint.sh && \
     echo '  echo "✓ HTTPS activé (certificats trouvés)"' >> /docker-entrypoint.sh && \
     echo 'elif [ "$USE_HTTPS" = "false" ] || [ "$USE_HTTP_ONLY" = "true" ]; then' >> /docker-entrypoint.sh && \
     echo '  cp /etc/nginx/conf.d/default-http.conf /etc/nginx/conf.d/default.conf' >> /docker-entrypoint.sh && \
+    echo '  rm -f /etc/nginx/conf.d/default-https.conf' >> /docker-entrypoint.sh && \
     echo '  echo "✓ HTTP activé (HTTPS explicitement désactivé)"' >> /docker-entrypoint.sh && \
     echo 'else' >> /docker-entrypoint.sh && \
+    echo '  cp /etc/nginx/conf.d/default-http.conf /etc/nginx/conf.d/default.conf' >> /docker-entrypoint.sh && \
+    echo '  rm -f /etc/nginx/conf.d/default-https.conf' >> /docker-entrypoint.sh && \
     echo '  echo "⚠️  Certificats SSL non trouvés, utilisation de HTTP"' >> /docker-entrypoint.sh && \
     echo '  echo "   Pour activer HTTPS, montez les certificats dans /etc/nginx/ssl/"' >> /docker-entrypoint.sh && \
-    echo '  cp /etc/nginx/conf.d/default-http.conf /etc/nginx/conf.d/default.conf' >> /docker-entrypoint.sh && \
     echo 'fi' >> /docker-entrypoint.sh && \
+    echo '' >> /docker-entrypoint.sh && \
     echo 'exec nginx -g "daemon off;"' >> /docker-entrypoint.sh && \
     chmod +x /docker-entrypoint.sh
 
