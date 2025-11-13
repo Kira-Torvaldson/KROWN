@@ -9,13 +9,16 @@ RUN apk add --no-cache \
 # Créer le répertoire de travail
 WORKDIR /app
 
+# Mettre à jour npm pour avoir une version récente (sans vulnérabilités)
+RUN npm install -g npm@latest
+
 # Copier les fichiers de dépendances
 COPY package.json ./
 
 # Installer les dépendances
 # Corriger automatiquement les vulnérabilités si possible
 RUN npm install --production && \
-    npm audit fix --force || true
+    npm audit fix || true
 
 # Copier le code source
 COPY server.js ./

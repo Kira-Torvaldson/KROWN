@@ -6,10 +6,13 @@ WORKDIR /app
 # Copier les fichiers de dépendances
 COPY package.json package-lock.json* ./
 
+# Mettre à jour npm pour avoir une version récente de npx (sans vulnérabilités)
+RUN npm install -g npm@latest
+
 # Installer les dépendances (incluant devDependencies pour le build)
 # Corriger automatiquement les vulnérabilités si possible
 RUN npm ci && \
-    npm audit fix --force || true
+    npm audit fix || true
 
 # Copier le code source
 COPY . .
