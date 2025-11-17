@@ -34,12 +34,7 @@ RUN addgroup -S nodeuser && \
     adduser -S -G nodeuser nodeuser && \
     chown -R nodeuser:nodeuser /app
 
-USER nodeuser
-
-# Exposer les ports
-EXPOSE 8080 8443
-
-# Script d'entrée pour générer les certificats si nécessaire
+# Script d'entrée pour générer les certificats si nécessaire (créé avant changement d'utilisateur)
 RUN echo '#!/bin/sh' > /docker-entrypoint.sh && \
     echo '# Générer les certificats SSL si absents et HTTPS activé' >> /docker-entrypoint.sh && \
     echo 'if [ "$USE_HTTPS" != "false" ] && [ "$USE_HTTPS" != "0" ]; then' >> /docker-entrypoint.sh && \
@@ -66,6 +61,12 @@ RUN echo '#!/bin/sh' > /docker-entrypoint.sh && \
     echo '' >> /docker-entrypoint.sh && \
     echo 'exec node server.js' >> /docker-entrypoint.sh && \
     chmod +x /docker-entrypoint.sh
+
+# Exposer les ports
+EXPOSE 8080 8443
+
+# Utilisateur non-root
+USER nodeuser
 
 # Point d'entrée
 CMD ["/docker-entrypoint.sh"]
