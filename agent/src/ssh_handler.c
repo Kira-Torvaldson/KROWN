@@ -251,14 +251,40 @@ response_code_t handle_ssh_connect(const char *json_data, char **response) {
         if (import_rc != SSH_OK || privkey == NULL) {
             printf("[SSH] ERREUR: Impossible d'importer la clé privée: %s\n", 
                    import_rc == SSH_OK ? "clé NULL" : ssh_get_error(session));
-            char error_msg[256];
+            char error_msg[512];
             snprintf(error_msg, sizeof(error_msg), 
-                    "{\"error\":\"Impossible d'importer la clé privée: format invalide ou clé corrompue\"}");
+                    "{\"error\":\"Impossible d'importer la clé privée: format invalide ou clé corrompue. Vérifiez le format de la clé (OpenSSH, PEM, etc.) et la passphrase si nécessaire.\"}");
             *response = strdup(error_msg);
             ssh_disconnect(session);
             ssh_free(session);
             json_object_put(root);
             return RESP_SSH_ERROR;
+        }
+        
+        // Extraire la clé publique pour le débogage
+        ssh_key pubkey = NULL;
+        if (ssh_pki_export_privkey_to_pubkey(privkey, &pubkey) == SSH_OK && pubkey != NULL) {
+            char *pubkey_str = NULL;
+            if (ssh_pki_export_pubkey_base64(pubkey, &pubkey_str) == SSH_OK && pubkey_str != NULL) {
+                // Afficher les 50 premiers caractères de la clé publique pour le débogage
+                char pubkey_preview[64] = {0};
+                strncpy(pubkey_preview, pubkey_str, 50);
+                printf("[SSH] Clé publique (preview): %s...\n", pubkey_preview);
+                printf("[SSH] Vérifiez que cette clé publique est dans ~/.ssh/authorized_keys sur le serveur\n");
+                ssh_string_free_char(pubkey_str);
+            }
+            ssh_key_free(pubkey);
+        }
+        
+        // Essayer d'abord avec ssh_userauth_try_publickey pour vérifier si la clé est acceptée
+        int try_rc = ssh_userauth_try_publickey(session, NULL, privkey);
+        if (try_rc == SSH_AUTH_SUCCESS) {
+            printf("[SSH] La clé publique est acceptée par le serveur, tentative d'authentification...\n");
+        } else if (try_rc == SSH_AUTH_DENIED) {
+            printf("[SSH] ATTENTION: La clé publique n'est PAS dans authorized_keys sur le serveur\n");
+            printf("[SSH] Vérifiez que la clé publique correspondante est dans ~/.ssh/authorized_keys\n");
+        } else {
+            printf("[SSH] Résultat du test de la clé: code %d\n", try_rc);
         }
         
         // Authentifier avec la clé privée
@@ -274,9 +300,15 @@ response_code_t handle_ssh_connect(const char *json_data, char **response) {
                    ssh_get_error(session), rc);
             
             if (rc == SSH_AUTH_DENIED) {
-                printf("[SSH] Accès refusé - la clé privée n'est peut-être pas autorisée sur le serveur\n");
+                printf("[SSH] Accès refusé - causes possibles:\n");
+                printf("[SSH]   1. La clé publique n'est pas dans ~/.ssh/authorized_keys sur le serveur\n");
+                printf("[SSH]   2. Les permissions de ~/.ssh ou authorized_keys sont incorrectes (doivent être 700 et 600)\n");
+                printf("[SSH]   3. La clé privée ne correspond pas à la clé publique dans authorized_keys\n");
+                printf("[SSH]   4. Le serveur SSH a désactivé l'authentification par clé publique\n");
             } else if (rc == SSH_AUTH_PARTIAL) {
                 printf("[SSH] Authentification partielle - méthode supplémentaire requise\n");
+            } else if (rc == SSH_AUTH_ERROR) {
+                printf("[SSH] Erreur lors de l'authentification - vérifiez les logs du serveur SSH\n");
             }
         }
     } else {
@@ -293,7 +325,7 @@ response_code_t handle_ssh_connect(const char *json_data, char **response) {
 
     if (rc != SSH_AUTH_SUCCESS) {
         const char *error_str = ssh_get_error(session);
-        char error_msg[512];
+        char error_msg[1024];
         
         // Obtenir plus de détails sur l'erreur
         int auth_methods = ssh_userauth_list(session, username);
@@ -309,9 +341,23 @@ response_code_t handle_ssh_connect(const char *json_data, char **response) {
             methods_str[len-1] = '\0';
         }
         
+        // Message d'erreur détaillé selon le type d'erreur
+        const char *error_detail = "";
+        if (rc == SSH_AUTH_DENIED) {
+            if (private_key && strlen(private_key) > 0) {
+                error_detail = " La clé publique n'est probablement pas dans ~/.ssh/authorized_keys sur le serveur. Vérifiez que la clé publique correspondante est bien ajoutée au fichier authorized_keys du serveur.";
+            } else {
+                error_detail = " Les identifiants sont incorrects ou l'utilisateur n'existe pas.";
+            }
+        } else if (rc == SSH_AUTH_PARTIAL) {
+            error_detail = " Authentification partielle - une méthode supplémentaire est requise.";
+        } else if (rc == SSH_AUTH_ERROR) {
+            error_detail = " Erreur lors de l'authentification - vérifiez les logs du serveur SSH.";
+        }
+        
         snprintf(error_msg, sizeof(error_msg), 
-                "{\"error\":\"Échec authentification: %s\",\"auth_methods_available\":\"%s\",\"auth_code\":%d}", 
-                error_str, methods_str, rc);
+                "{\"error\":\"Échec authentification: %s%s\",\"auth_methods_available\":\"%s\",\"auth_code\":%d,\"hint\":\"Vérifiez les logs de l'agent pour plus de détails\"}", 
+                error_str, error_detail, methods_str, rc);
         *response = strdup(error_msg);
         ssh_disconnect(session);
         ssh_free(session);
