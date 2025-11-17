@@ -56,6 +56,7 @@ export interface CreateSessionRequest {
   username: string
   password?: string
   private_key?: string
+  passphrase?: string
 }
 
 export interface ExecuteCommandRequest {

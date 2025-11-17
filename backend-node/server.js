@@ -137,7 +137,7 @@ app.get('/api/ping', async (req, res) => {
 // Sessions SSH
 app.post('/api/sessions', async (req, res) => {
     try {
-        const { host, port = 22, username, password, private_key } = req.body;
+        const { host, port = 22, username, password, private_key, passphrase } = req.body;
         
         console.log('[API] Tentative de connexion SSH:', { 
             host, 
@@ -145,7 +145,8 @@ app.post('/api/sessions', async (req, res) => {
             username, 
             hasPassword: !!password, 
             passwordLength: password ? password.length : 0,
-            hasKey: !!private_key 
+            hasKey: !!private_key,
+            hasPassphrase: !!passphrase
         });
         
         if (!host || !username) {
@@ -176,7 +177,7 @@ app.post('/api/sessions', async (req, res) => {
         }
 
         console.log('[API] Envoi de la commande SSH_CONNECT à l\'agent...');
-        const result = await agentClient.sshConnect(host, port, username, password, private_key);
+        const result = await agentClient.sshConnect(host, port, username, password, private_key, passphrase);
         
         console.log('[API] Réponse de l\'agent:', { code: result.code, data: result.data });
         

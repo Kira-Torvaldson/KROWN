@@ -94,8 +94,8 @@ response_code_t handle_ssh_connect(const char *json_data, char **response) {
         return RESP_ERROR;
     }
 
-    json_object *host_obj, *port_obj, *user_obj, *pass_obj, *key_obj;
-    const char *host, *username, *password = NULL, *private_key = NULL;
+    json_object *host_obj, *port_obj, *user_obj, *pass_obj, *key_obj, *passphrase_obj;
+    const char *host, *username, *password = NULL, *private_key = NULL, *passphrase = NULL;
     int port = 22;
 
     json_object_object_get_ex(root, "host", &host_obj);
@@ -103,6 +103,7 @@ response_code_t handle_ssh_connect(const char *json_data, char **response) {
     json_object_object_get_ex(root, "port", &port_obj);
     json_object_object_get_ex(root, "password", &pass_obj);
     json_object_object_get_ex(root, "private_key", &key_obj);
+    json_object_object_get_ex(root, "passphrase", &passphrase_obj);
 
     if (!host_obj || !user_obj) {
         json_object_put(root);
@@ -118,6 +119,10 @@ response_code_t handle_ssh_connect(const char *json_data, char **response) {
         printf("[SSH] Mot de passe reçu (longueur: %zu)\n", password ? strlen(password) : 0);
     }
     if (key_obj) private_key = json_object_get_string(key_obj);
+    if (passphrase_obj) {
+        passphrase = json_object_get_string(passphrase_obj);
+        printf("[SSH] Passphrase reçue (longueur: %zu)\n", passphrase ? strlen(passphrase) : 0);
+    }
 
     // Créer la session SSH
     ssh_session session = ssh_new();
@@ -236,9 +241,9 @@ response_code_t handle_ssh_connect(const char *json_data, char **response) {
         // Changer les permissions du fichier (lecture seule pour le propriétaire)
         chmod(tmp_key_file, 0600);
         
-        // Importer la clé privée
+        // Importer la clé privée (avec passphrase si fournie)
         ssh_key privkey = NULL;
-        int import_rc = ssh_pki_import_privkey_file(tmp_key_file, NULL, NULL, NULL, &privkey);
+        int import_rc = ssh_pki_import_privkey_file(tmp_key_file, passphrase, NULL, NULL, &privkey);
         
         // Supprimer le fichier temporaire immédiatement après import
         unlink(tmp_key_file);

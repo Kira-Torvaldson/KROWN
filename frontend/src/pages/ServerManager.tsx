@@ -32,13 +32,27 @@ export default function ServerManager() {
     setLoading(true)
     try {
       // Le backend attend password et private_key directement dans le body
-      const session = await apiService.createSession({
+      // Construire l'objet de requête sans inclure les champs undefined
+      const requestData: any = {
         host: server.host,
         port: server.port,
         username: server.username,
-        password: server.authMethod === 'password' ? server.password : undefined,
-        private_key: server.authMethod === 'key' ? server.privateKey : undefined,
-      })
+      }
+      
+      if (server.authMethod === 'password') {
+        if (server.password) {
+          requestData.password = server.password
+        }
+      } else if (server.authMethod === 'key') {
+        if (server.privateKey) {
+          requestData.private_key = server.privateKey
+        }
+        if (server.passphrase) {
+          requestData.passphrase = server.passphrase
+        }
+      }
+      
+      const session = await apiService.createSession(requestData)
 
       navigate(`/terminal/${session.id}`)
     } catch (error: any) {

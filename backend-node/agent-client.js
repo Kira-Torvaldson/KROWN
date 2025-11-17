@@ -139,15 +139,25 @@ export class AgentClient {
     /**
      * Connecter une session SSH
      */
-    async sshConnect(host, port, username, password, privateKey) {
+    async sshConnect(host, port, username, password, privateKey, passphrase) {
         const CMD_SSH_CONNECT = 2;
-        return this.sendCommand(CMD_SSH_CONNECT, {
+        const data = {
             host,
             port,
-            username,
-            password,
-            private_key: privateKey
-        });
+            username
+        };
+        
+        if (password) {
+            data.password = password;
+        }
+        if (privateKey) {
+            data.private_key = privateKey;
+        }
+        if (passphrase) {
+            data.passphrase = passphrase;
+        }
+        
+        return this.sendCommand(CMD_SSH_CONNECT, data);
     }
 
     /**
