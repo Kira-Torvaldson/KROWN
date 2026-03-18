@@ -153,6 +153,15 @@ app.post('/api/sessions', async (req, res) => {
             return res.status(400).json({ error: 'host et username requis' });
         }
 
+        // Politique: authentification par clé uniquement (pas de mot de passe)
+        if (password && String(password).length > 0) {
+            return res.status(400).json({
+                error: 'Authentification par mot de passe non supportée. Utilisez une clé SSH (private_key/passphrase) ou une clé locale (ssh-agent).',
+                remote_agent_install_required: false,
+                note: 'krown-agent est un daemon local (ou conteneur) et ne s’installe pas sur la machine SSH distante.'
+            });
+        }
+
         // Vérifier que l'agent est disponible
         if (!agentClient.isAvailable()) {
             console.error('[API] Agent non disponible pour la connexion SSH');
@@ -177,7 +186,7 @@ app.post('/api/sessions', async (req, res) => {
         }
 
         console.log('[API] Envoi de la commande SSH_CONNECT à l\'agent...');
-        const result = await agentClient.sshConnect(host, port, username, password, private_key, passphrase);
+        const result = await agentClient.sshConnect(host, port, username, null, private_key, passphrase);
         
         console.log('[API] Réponse de l\'agent:', { code: result.code, data: result.data });
         

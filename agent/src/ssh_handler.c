@@ -83,6 +83,58 @@ static char* json_error(const char *message) {
     return out;
 }
 
+static const char* known_host_status_str(enum ssh_known_hosts_e state) {
+    switch (state) {
+        case SSH_KNOWN_HOSTS_OK: return "ok";
+        case SSH_KNOWN_HOSTS_CHANGED: return "changed";
+        case SSH_KNOWN_HOSTS_OTHER: return "other";
+        case SSH_KNOWN_HOSTS_UNKNOWN: return "unknown";
+        case SSH_KNOWN_HOSTS_NOT_FOUND: return "not_found";
+        case SSH_KNOWN_HOSTS_ERROR: return "error";
+        default: return "unknown_state";
+    }
+}
+
+static char* get_server_fingerprint_sha256(ssh_session session) {
+    ssh_key srvkey = NULL;
+    unsigned char *hash = NULL;
+    size_t hlen = 0;
+    char *fp = NULL;
+
+    if (ssh_get_server_publickey(session, &srvkey) != SSH_OK) {
+        return NULL;
+    }
+    if (ssh_get_publickey_hash(srvkey, SSH_PUBLICKEY_HASH_SHA256, &hash, &hlen) != SSH_OK) {
+        ssh_key_free(srvkey);
+        return NULL;
+    }
+    fp = ssh_get_fingerprint_hash(SSH_PUBLICKEY_HASH_SHA256, hash, hlen);
+    ssh_clean_pubkey_hash(&hash);
+    ssh_key_free(srvkey);
+    return fp; // libéré via ssh_string_free_char()
+}
+
+static int verify_host_key_strict(ssh_session session, char **out_json_error) {
+    enum ssh_known_hosts_e state = ssh_session_is_known_server(session);
+    if (state == SSH_KNOWN_HOSTS_OK) {
+        return 0;
+    }
+
+    char *fp = get_server_fingerprint_sha256(session);
+    json_object *obj = json_object_new_object();
+    json_object_object_add(obj, "error", json_object_new_string("Vérification host key échouée"));
+    json_object_object_add(obj, "known_hosts_status", json_object_new_string(known_host_status_str(state)));
+    if (fp) {
+        json_object_object_add(obj, "fingerprint_sha256", json_object_new_string(fp));
+        ssh_string_free_char(fp);
+    }
+    json_object_object_add(obj, "note", json_object_new_string("Refus strict: validez/ajoutez la host key dans known_hosts côté agent (pas de contournement)."));
+    const char *s = json_object_to_json_string_ext(obj, JSON_C_TO_STRING_PLAIN);
+    *out_json_error = strdup(s);
+    json_object_put(obj);
+    return -1;
+}
+
 /**
  * Initialiser le gestionnaire SSH
  */
@@ -158,12 +210,19 @@ response_code_t handle_ssh_connect(const char *json_data, char **response) {
     if (port_obj) port = json_object_get_int(port_obj);
     if (pass_obj) {
         password = json_object_get_string(pass_obj);
-        printf("[SSH] Mot de passe reçu (longueur: %zu)\n", password ? strlen(password) : 0);
+        printf("[SSH] Mot de passe fourni: %s\n", (password && password[0]) ? "oui (refusé)" : "vide");
     }
     if (key_obj) private_key = json_object_get_string(key_obj);
     if (passphrase_obj) {
         passphrase = json_object_get_string(passphrase_obj);
         printf("[SSH] Passphrase reçue (longueur: %zu)\n", passphrase ? strlen(passphrase) : 0);
+    }
+
+    // Politique: authentification par clé uniquement (pas de mot de passe)
+    if (password && password[0] != '\0') {
+        json_object_put(root);
+        *response = json_error("Authentification par mot de passe non supportée (clé SSH uniquement).");
+        return RESP_SSH_ERROR;
     }
 
     // Créer la session SSH
@@ -195,11 +254,23 @@ response_code_t handle_ssh_connect(const char *json_data, char **response) {
         return RESP_SSH_ERROR;
     }
 
-    // Authentification
+    // Vérification stricte de la host key (known_hosts)
+    char *hostkey_err = NULL;
+    if (verify_host_key_strict(session, &hostkey_err) != 0) {
+        printf("[SSH] Host key refusée: %s\n", hostkey_err ? hostkey_err : "unknown");
+        *response = hostkey_err ? hostkey_err : json_error("Vérification host key échouée");
+        ssh_disconnect(session);
+        ssh_free(session);
+        json_object_put(root);
+        return RESP_SSH_ERROR;
+    }
+
+    // Authentification (clé uniquement)
     printf("[SSH] Tentative d'authentification pour %s@%s:%d\n", username, host, port);
     
-    // Obtenir les méthodes d'authentification disponibles AVANT d'essayer
-    int auth_methods = ssh_userauth_list(session, username);
+    // Amorcer la phase d'auth
+    (void)ssh_userauth_none(session, NULL);
+    int auth_methods = ssh_userauth_list(session, NULL);
     printf("[SSH] Méthodes d'authentification disponibles: ");
     if (auth_methods & SSH_AUTH_METHOD_PUBLICKEY) printf("publickey ");
     if (auth_methods & SSH_AUTH_METHOD_PASSWORD) printf("password ");
@@ -207,35 +278,7 @@ response_code_t handle_ssh_connect(const char *json_data, char **response) {
     if (auth_methods & SSH_AUTH_METHOD_INTERACTIVE) printf("keyboard-interactive ");
     printf("\n");
     
-    if (password && strlen(password) > 0) {
-        printf("[SSH] Méthode: mot de passe (longueur: %zu)\n", strlen(password));
-        
-        // Vérifier que le serveur accepte l'authentification par mot de passe
-        if (!(auth_methods & SSH_AUTH_METHOD_PASSWORD)) {
-            printf("[SSH] ERREUR: Le serveur n'accepte pas l'authentification par mot de passe\n");
-            *response = json_error("Le serveur SSH n'accepte pas l'authentification par mot de passe");
-            ssh_disconnect(session);
-            ssh_free(session);
-            json_object_put(root);
-            return RESP_SSH_ERROR;
-        }
-        
-        rc = ssh_userauth_password(session, NULL, password);
-        
-        if (rc == SSH_AUTH_SUCCESS) {
-            printf("[SSH] Authentification par mot de passe réussie\n");
-        } else {
-            printf("[SSH] Échec authentification par mot de passe: %s (code: %d)\n", 
-                   ssh_get_error(session), rc);
-            
-            // Essayer d'obtenir plus d'informations sur l'erreur
-            if (rc == SSH_AUTH_DENIED) {
-                printf("[SSH] Accès refusé - le mot de passe est peut-être incorrect\n");
-            } else if (rc == SSH_AUTH_PARTIAL) {
-                printf("[SSH] Authentification partielle - méthode supplémentaire requise\n");
-            }
-        }
-    } else if (private_key && strlen(private_key) > 0) {
+    if (private_key && strlen(private_key) > 0) {
         printf("[SSH] Méthode: clé privée (longueur: %zu)\n", strlen(private_key));
         
         // Vérifier que le serveur accepte l'authentification par clé publique
@@ -277,9 +320,10 @@ response_code_t handle_ssh_connect(const char *json_data, char **response) {
         // Changer les permissions du fichier (lecture seule pour le propriétaire)
         chmod(tmp_key_file, 0600);
         
-        // Importer la clé privée (avec passphrase si fournie)
+        // Importer la clé privée (passphrase NULL si vide)
+        const char *passphrase_opt = (passphrase && passphrase[0] != '\0') ? passphrase : NULL;
         ssh_key privkey = NULL;
-        int import_rc = ssh_pki_import_privkey_file(tmp_key_file, passphrase, NULL, NULL, &privkey);
+        int import_rc = ssh_pki_import_privkey_file(tmp_key_file, passphrase_opt, NULL, NULL, &privkey);
         
         // Supprimer le fichier temporaire immédiatement après import
         unlink(tmp_key_file);
@@ -293,6 +337,11 @@ response_code_t handle_ssh_connect(const char *json_data, char **response) {
             json_object_put(root);
             return RESP_SSH_ERROR;
         }
+
+        // Logs: type de clé importée
+        enum ssh_keytypes_e kt = ssh_key_type(privkey);
+        const char *kt_str = ssh_key_type_to_char(kt);
+        printf("[SSH] Type de clé privée importée: %s\n", kt_str ? kt_str : "unknown");
         
         // Extraire la clé publique pour le débogage
         ssh_key pubkey = NULL;
@@ -345,7 +394,7 @@ response_code_t handle_ssh_connect(const char *json_data, char **response) {
             }
         }
     } else {
-        printf("[SSH] Méthode: clé publique automatique\n");
+        printf("[SSH] Méthode: clé publique automatique (ssh-agent/keys locales)\n");
         rc = ssh_userauth_publickey_auto(session, NULL, NULL);
         
         if (rc == SSH_AUTH_SUCCESS) {
@@ -359,7 +408,7 @@ response_code_t handle_ssh_connect(const char *json_data, char **response) {
     if (rc != SSH_AUTH_SUCCESS) {
         const char *error_str = ssh_get_error(session);
         // Obtenir plus de détails sur l'erreur
-        int auth_methods = ssh_userauth_list(session, username);
+        int auth_methods = ssh_userauth_list(session, NULL);
         json_object *obj = json_object_new_object();
         json_object_object_add(obj, "error", json_object_new_string("Échec authentification SSH"));
         json_object_object_add(obj, "details", json_object_new_string(error_str ? error_str : "unknown"));

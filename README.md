@@ -328,19 +328,10 @@ curl http://localhost:8080/api/health
 curl http://localhost:8080/api/ping
 ```
 
-#### Créer une session SSH
+#### Créer une session SSH (clé uniquement)
 
-**Avec authentification par mot de passe :**
-```bash
-curl -X POST http://localhost:8080/api/sessions \
-  -H "Content-Type: application/json" \
-  -d '{
-    "host": "example.com",
-    "port": 22,
-    "username": "user",
-    "password": "pass"
-  }'
-```
+Krown **n'autorise pas** l'authentification par mot de passe : utilisez une clé privée (`private_key`) + optionnellement `passphrase`,
+ou laissez l'agent utiliser les clés disponibles localement (ssh-agent / clés locales) si aucune clé explicite n'est fournie.
 
 **Avec authentification par clé SSH privée :**
 ```bash
@@ -627,7 +618,7 @@ node test-agent.js
 **4. Causes courantes :**
 - Agent non démarré → Démarrer l'agent
 - Erreur de connexion SSH → Vérifier host/port/credentials
-- Erreur d'authentification → Vérifier password/clé SSH
+- Erreur d'authentification → Vérifier la clé SSH (authorized_keys, permissions, passphrase)
 - Timeout → L'agent est bloqué ou ne répond pas
 
 ### Erreur : "Resource temporarily unavailable" (Agent)
@@ -744,4 +735,4 @@ Les contributions sont les bienvenues ! N'hésitez pas à ouvrir une issue ou un
 
 ## License
 
-GPL-3.0 - Voir [LICENSE](LICENSE) pour plus de détails.
+MIT - Voir [LICENSE](LICENSE) pour plus de détails.
