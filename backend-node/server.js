@@ -290,27 +290,45 @@ app.delete('/api/sessions/:id', async (req, res) => {
 app.post('/api/sessions/:id/execute', async (req, res) => {
     try {
         const { id } = req.params;
-        const { command } = req.body;
+        const { command, request_pty } = req.body;
         
         if (!command) {
             return res.status(400).json({ error: 'command requis' });
         }
 
-        const result = await agentClient.sshExecute(id, command);
+        if (!agentClient.isAvailable()) {
+            return res.status(503).json({
+                error: 'Agent SSH non disponible. Vérifiez que krown-agent est démarré.',
+                socket_path: AGENT_SOCKET,
+                remote_agent_install_required: false,
+                note: 'krown-agent est un daemon local (ou conteneur) et ne s’installe pas sur la machine SSH distante.'
+            });
+        }
+
+        const result = await agentClient.sshExecute(id, command, !!request_pty);
         
         if (result.code === 0) {
             // Émettre la sortie via WebSocket
             io.emit('session:output', {
                 session_id: id,
                 output: result.data.output,
-                exit_code: result.data.exit_code
+                stderr: result.data.stderr,
+                exit_code: result.data.exit_code,
+                pty_used: result.data.pty_used
             });
             res.json(result.data);
         } else {
             res.status(500).json(result.data || { error: 'Erreur exécution' });
         }
     } catch (error) {
-        res.status(500).json({ error: error.message });
+        // Agent local uniquement: clarifier l'erreur quand le socket est absent
+        const message = error?.message || 'Erreur exécution';
+        const isAgentUnavailable = message.toLowerCase().includes('agent non disponible');
+        res.status(isAgentUnavailable ? 503 : 500).json({
+            error: message,
+            remote_agent_install_required: false,
+            note: 'krown-agent est un daemon local (ou conteneur) et ne s’installe pas sur la machine SSH distante.'
+        });
     }
 });
 

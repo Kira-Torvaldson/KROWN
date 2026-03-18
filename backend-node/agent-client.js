@@ -8,6 +8,7 @@ import { existsSync } from 'fs';
 
 const SOCKET_PATH = '/tmp/krown-agent.sock';
 const PROTOCOL_VERSION = 1;
+const MAX_PAYLOAD_LEN = 1024 * 1024; // 1 MiB, doit rester cohérent avec l'agent
 
 /**
  * Classe pour communiquer avec l'agent C
@@ -30,22 +31,35 @@ export class AgentClient {
     async sendCommand(cmdType, data = {}) {
         return new Promise((resolve, reject) => {
             if (!this.isAvailable()) {
-                reject(new Error('Agent non disponible. Assurez-vous que krown-agent est démarré.'));
+                reject(new Error(
+                    `Agent non disponible. L'agent C (krown-agent) doit être démarré localement sur cette machine (socket: ${this.socketPath}).`
+                ));
                 return;
             }
 
             const client = createConnection(this.socketPath);
             
-            // Gestion des erreurs de connexion
-            client.on('error', (err) => {
-                console.error('[AgentClient] Erreur de connexion au socket:', err.message);
-                reject(new Error(`Impossible de se connecter à l'agent: ${err.message}`));
-            });
+            let settled = false;
+            let timeout;
+            const settleOnce = (err, value) => {
+                if (settled) return;
+                settled = true;
+                clearTimeout(timeout);
+                client.removeAllListeners();
+                try { client.end(); } catch {}
+                if (err) reject(err);
+                else resolve(value);
+            };
 
             client.on('connect', () => {
                 // Préparer la commande
                 const jsonData = JSON.stringify(data);
                 const dataLen = Buffer.byteLength(jsonData, 'utf8');
+                if (dataLen > MAX_PAYLOAD_LEN) {
+                    client.destroy();
+                    settleOnce(new Error(`Payload trop grand: ${dataLen} (max=${MAX_PAYLOAD_LEN})`));
+                    return;
+                }
 
                 // En-tête: version (4 bytes) + cmd_type (4 bytes) + data_len (4 bytes)
                 const header = Buffer.allocUnsafe(12);
@@ -63,11 +77,12 @@ export class AgentClient {
             let responseBuffer = Buffer.alloc(0);
             let headerRead = false;
             let expectedDataLen = 0;
+            let responseCode = null;
             
             // Timeout pour éviter les blocages (30 secondes)
-            const timeout = setTimeout(() => {
+            timeout = setTimeout(() => {
                 client.destroy();
-                reject(new Error('Timeout: L\'agent n\'a pas répondu dans les 30 secondes'));
+                settleOnce(new Error('Timeout: l\'agent n\'a pas répondu dans les 30 secondes'));
             }, 30000);
 
             client.on('data', (data) => {
@@ -80,49 +95,54 @@ export class AgentClient {
                     expectedDataLen = responseBuffer.readUInt32LE(8);
 
                     if (version !== PROTOCOL_VERSION) {
-                        clearTimeout(timeout);
                         client.destroy();
-                        reject(new Error(`Version de protocole invalide: ${version}`));
+                        settleOnce(new Error(`Version de protocole invalide: ${version}`));
+                        return;
+                    }
+
+                    if (expectedDataLen > MAX_PAYLOAD_LEN) {
+                        client.destroy();
+                        settleOnce(new Error(`Payload trop grand: ${expectedDataLen} (max=${MAX_PAYLOAD_LEN})`));
                         return;
                     }
 
                     headerRead = true;
+                    responseCode = code;
                     responseBuffer = responseBuffer.slice(12);
 
                     // Si pas de données, terminer
                     if (expectedDataLen === 0) {
-                        clearTimeout(timeout);
-                        client.end();
-                        resolve({ code, data: null });
+                        settleOnce(null, { code, data: null });
                         return;
                     }
                 }
 
                 // Si on a tout reçu
                 if (headerRead && responseBuffer.length >= expectedDataLen) {
-                    clearTimeout(timeout);
                     const jsonData = responseBuffer.toString('utf8', 0, expectedDataLen);
                     try {
                         const parsed = JSON.parse(jsonData);
-                        client.end();
-                        resolve({ code: responseBuffer.readUInt32LE(4), data: parsed });
+                        settleOnce(null, { code: responseCode ?? 1, data: parsed });
                     } catch (e) {
-                        client.end();
-                        reject(new Error(`Erreur parsing JSON: ${e.message}`));
+                        settleOnce(new Error(`Erreur parsing JSON: ${e.message}`));
                     }
                 }
             });
 
             client.on('error', (err) => {
-                clearTimeout(timeout);
                 console.error('[AgentClient] Erreur socket:', err.message);
-                reject(new Error(`Erreur de communication avec l'agent: ${err.message}`));
+                settleOnce(new Error(`Erreur de communication avec l'agent: ${err.message}`));
             });
 
             client.on('close', () => {
-                clearTimeout(timeout);
+                if (settled) return;
                 if (!headerRead) {
-                    reject(new Error('Connexion fermée avant réception complète de la réponse'));
+                    settleOnce(new Error('Connexion fermée avant réception de l\'en-tête de réponse'));
+                    return;
+                }
+                if (responseBuffer.length < expectedDataLen) {
+                    settleOnce(new Error('Connexion fermée avant réception complète du payload'));
+                    return;
                 }
             });
         });
@@ -171,11 +191,12 @@ export class AgentClient {
     /**
      * Exécuter une commande SSH
      */
-    async sshExecute(sessionId, command) {
+    async sshExecute(sessionId, command, requestPty = false) {
         const CMD_SSH_EXECUTE = 4;
         return this.sendCommand(CMD_SSH_EXECUTE, {
             session_id: sessionId,
-            command
+            command,
+            request_pty: !!requestPty
         });
     }
 

@@ -26,7 +26,12 @@ typedef enum {
     RESP_OK = 0,
     RESP_ERROR = 1,
     RESP_INVALID_CMD = 2,
-    RESP_SSH_ERROR = 3
+    RESP_SSH_ERROR = 3,
+    // Erreurs protocole / transport
+    RESP_INVALID_PROTO = 4,
+    RESP_INVALID_JSON = 5,
+    RESP_TOO_LARGE = 6,
+    RESP_IO_ERROR = 7
 } response_code_t;
 
 // Structure de commande

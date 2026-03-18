@@ -75,6 +75,11 @@ Krown utilise une architecture hybride **C + Node.js** pour combiner performance
 
 L'agent C écoute sur un socket Unix (`/tmp/krown-agent.sock`) avec un protocole binaire :
 
+**Important : agent local uniquement**
+
+- `krown-agent` tourne **localement** (ou dans un conteneur Docker) à côté de `krown-api`.
+- Il **ne s'installe pas** sur la machine SSH distante. La machine distante n'expose que SSH.
+
 **Format de commande** :
 ```
 [Version: 4 bytes][Type: 4 bytes][Data Length: 4 bytes][Data: JSON]
@@ -386,15 +391,41 @@ curl -X DELETE http://localhost:8080/api/sessions/SESSION_ID
 ```bash
 curl -X POST http://localhost:8080/api/sessions/SESSION_ID/execute \
   -H "Content-Type: application/json" \
-  -d '{"command": "ls -la"}'
+  -d '{"command": "whoami"}'
 ```
 
 **Réponse :**
 ```json
 {
-  "output": "total 24\ndrwxr-xr-x ...",
+  "output": "user\n",
+  "stderr": "",
   "exit_code": 0,
-  "bytes_read": 1234
+  "bytes_stdout": 5,
+  "bytes_stderr": 0,
+  "pty_used": false
+}
+```
+
+#### Exécuter une commande avec PTY (pseudo-terminal)
+
+Certaines commandes nécessitent un pseudo-terminal (ex: environnements configurés avec `requiretty`, ou commandes interactives).
+Dans ce cas, utilisez `request_pty: true`.
+
+```bash
+curl -X POST http://localhost:8080/api/sessions/SESSION_ID/execute \
+  -H "Content-Type: application/json" \
+  -d '{"command": "sudo -n whoami", "request_pty": true}'
+```
+
+**Réponse (exemple) :**
+```json
+{
+  "output": "root\n",
+  "stderr": "",
+  "exit_code": 0,
+  "bytes_stdout": 5,
+  "bytes_stderr": 0,
+  "pty_used": true
 }
 ```
 
