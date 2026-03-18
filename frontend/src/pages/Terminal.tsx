@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { Terminal as XTerm } from 'xterm'
 import { FitAddon } from 'xterm-addon-fit'
@@ -25,22 +25,7 @@ export default function Terminal() {
   const [historyIndex, setHistoryIndex] = useState(-1)
   const [loading, setLoading] = useState(true)
 
-  useEffect(() => {
-    if (!sessionId) return
-
-    loadSession()
-    initTerminal()
-    connectStream()
-
-    return () => {
-      wsService.disconnectStream()
-      if (xtermRef.current) {
-        xtermRef.current.dispose()
-      }
-    }
-  }, [sessionId])
-
-  const loadSession = async () => {
+  const loadSession = useCallback(async () => {
     try {
       const data = await apiService.getSession(sessionId!)
       setSession(data)
@@ -54,9 +39,9 @@ export default function Terminal() {
     } finally {
       setLoading(false)
     }
-  }
+  }, [navigate, sessionId])
 
-  const initTerminal = () => {
+  const initTerminal = useCallback(() => {
     if (!terminalRef.current) return
 
     const xterm = new XTerm({
@@ -96,10 +81,10 @@ export default function Terminal() {
     return () => {
       window.removeEventListener('resize', handleResize)
     }
-  }
+  }, [])
 
-  const connectStream = () => {
-    if (!token || !sessionId) return
+  const connectStream = useCallback(() => {
+    if (!sessionId) return
 
     // Connect to stream WebSocket
     wsService.connectStream(sessionId, token)
@@ -161,7 +146,25 @@ export default function Terminal() {
         xtermRef.current.write('$ ')
       }
     })
-  }
+  }, [sessionId, token])
+
+  useEffect(() => {
+    if (!sessionId) return
+
+    loadSession()
+    const cleanupTerminal = initTerminal()
+    connectStream()
+
+    return () => {
+      wsService.disconnectStream()
+      if (cleanupTerminal) {
+        cleanupTerminal()
+      }
+      if (xtermRef.current) {
+        xtermRef.current.dispose()
+      }
+    }
+  }, [sessionId, loadSession, initTerminal, connectStream])
 
   const executeCommand = async () => {
     if (!command.trim() || !sessionId) return
@@ -288,4 +291,3 @@ export default function Terminal() {
     </div>
   )
 }
-

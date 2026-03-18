@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { apiService } from '../services/api'
 import { Session, Server } from '../types'
@@ -11,11 +11,12 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true)
   const navigate = useNavigate()
 
-  useEffect(() => {
-    loadData()
+  const loadServersFromStorage = useCallback((): Server[] => {
+    const stored = localStorage.getItem('krown_servers')
+    return stored ? JSON.parse(stored) : []
   }, [])
 
-  const loadData = async () => {
+  const loadData = useCallback(async () => {
     try {
       const [sessionsData, serversData] = await Promise.all([
         apiService.getSessions(),
@@ -28,12 +29,11 @@ export default function Dashboard() {
     } finally {
       setLoading(false)
     }
-  }
+  }, [loadServersFromStorage])
 
-  const loadServersFromStorage = (): Server[] => {
-    const stored = localStorage.getItem('krown_servers')
-    return stored ? JSON.parse(stored) : []
-  }
+  useEffect(() => {
+    loadData()
+  }, [loadData])
 
   const getStatusColor = (status: Session['status']) => {
     switch (status) {
@@ -159,4 +159,3 @@ export default function Dashboard() {
     </div>
   )
 }
-

@@ -4,7 +4,6 @@ import type {
   Server,
   Session,
   CommandExecution,
-  LoginRequest,
   LoginResponse,
   CreateSessionRequest,
   ExecuteCommandRequest,

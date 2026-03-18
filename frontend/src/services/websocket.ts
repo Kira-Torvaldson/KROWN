@@ -1,4 +1,3 @@
-import type { Session } from '../types'
 
 export type WebSocketMessage =
   | { event: 'welcome'; message?: string; payload?: { message: string } }
@@ -152,11 +151,11 @@ export class WebSocketService {
   }
 
   private attemptReconnectStream(sessionId: string) {
-    if (this.reconnectAttempts < this.maxReconnectAttempts && this.token) {
+    if (this.reconnectAttempts < this.maxReconnectAttempts) {
       this.reconnectAttempts++
       setTimeout(() => {
         console.log(`Reconnecting stream... (attempt ${this.reconnectAttempts})`)
-        this.connectStream(sessionId, this.token!)
+        this.connectStream(sessionId, this.token)
       }, this.reconnectDelay * this.reconnectAttempts)
     }
   }
@@ -187,4 +186,3 @@ export class WebSocketService {
 }
 
 export const wsService = new WebSocketService()
-

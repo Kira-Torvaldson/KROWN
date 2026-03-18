@@ -210,7 +210,7 @@ make         # Compile
 
 **Option A : Scripts npm (recommandé)**
 ```bash
-npm run dev  # Démarre backend + frontend
+npm run dev  # Démarre backend + frontend (installe auto les dépendances manquantes)
 ```
 
 **Option B : Démarrer séparément**
@@ -498,15 +498,15 @@ Le frontend React est disponible sur `http://localhost:3000` (ou `https://localh
 
 | Commande | Description |
 |----------|-------------|
-| `npm install` | Installe npm-run-all |
+| `npm install` | Installe les dépendances racine et déclenche l'installation backend/frontend |
 | `npm run install:all` | Installe toutes les dépendances |
 | `npm run install:backend` | Installe les dépendances du backend |
 | `npm run install:frontend` | Installe les dépendances du frontend |
-| `npm run dev` | Lance backend + frontend en mode dev |
+| `npm run dev` | Lance backend + frontend en mode dev (auto-install si nécessaire) |
 | `npm run dev:backend` | Lance uniquement le backend |
 | `npm run dev:frontend` | Lance uniquement le frontend |
 | `npm run build` | Build pour production |
-| `npm start` | Lance en mode production |
+| `npm start` | Lance en mode production (auto-install si nécessaire) |
 
 ### Compilation de l'agent C
 

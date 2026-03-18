@@ -1,6 +1,6 @@
 import { ReactNode } from 'react'
 import { Link, useLocation } from 'react-router-dom'
-import { LayoutDashboard, Server, Terminal, History, Menu, X, FileText } from 'lucide-react'
+import { LayoutDashboard, Server, History, Menu, X, FileText } from 'lucide-react'
 import { useState } from 'react'
 import './Layout.css'
 

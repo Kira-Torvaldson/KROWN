@@ -12,7 +12,7 @@ export default defineConfig({
         changeOrigin: true,
         secure: false,
         timeout: 10000,
-        onError: (err, req, res) => {
+        onError: (err, _req, _res) => {
           console.error('Proxy error:', err.message);
           if (err.code === 'ECONNREFUSED') {
             console.error('⚠️  Backend non accessible sur http://localhost:8080');

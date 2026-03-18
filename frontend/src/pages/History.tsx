@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { apiService } from '../services/api'
 import { Session, CommandExecution } from '../types'
@@ -9,21 +9,11 @@ import './History.css'
 export default function History() {
   const [sessions, setSessions] = useState<Session[]>([])
   const [selectedSession, setSelectedSession] = useState<Session | null>(null)
-  const [commands, setCommands] = useState<CommandExecution[]>([])
+  const [commands] = useState<CommandExecution[]>([])
   const [loading, setLoading] = useState(true)
   const navigate = useNavigate()
 
-  useEffect(() => {
-    loadSessions()
-  }, [])
-
-  useEffect(() => {
-    if (selectedSession) {
-      loadCommands(selectedSession.id)
-    }
-  }, [selectedSession])
-
-  const loadSessions = async () => {
+  const loadSessions = useCallback(async () => {
     try {
       const data = await apiService.getSessions()
       setSessions(data.sort((a, b) => 
@@ -37,9 +27,9 @@ export default function History() {
     } finally {
       setLoading(false)
     }
-  }
+  }, [selectedSession])
 
-  const loadCommands = async (sessionId: string) => {
+  const loadCommands = useCallback(async (_sessionId: string) => {
     // Note: L'API backend devrait avoir un endpoint pour récupérer les commandes
     // Pour l'instant, on simule avec les données disponibles
     try {
@@ -49,7 +39,17 @@ export default function History() {
     } catch (error) {
       console.error('Failed to load commands:', error)
     }
-  }
+  }, [])
+
+  useEffect(() => {
+    loadSessions()
+  }, [loadSessions])
+
+  useEffect(() => {
+    if (selectedSession) {
+      loadCommands(selectedSession.id)
+    }
+  }, [selectedSession, loadCommands])
 
   const getStatusColor = (status: Session['status']) => {
     switch (status) {
@@ -192,4 +192,3 @@ export default function History() {
     </div>
   )
 }
-

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { apiService } from '../services/api'
 import { FileText, RefreshCw, Download, AlertCircle } from 'lucide-react'
 import './Logs.css'
@@ -11,7 +11,7 @@ export default function Logs() {
   const [autoRefresh, setAutoRefresh] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  const loadLogs = async () => {
+  const loadLogs = useCallback(async () => {
     // Authentication disabled
     setLoading(true)
     setError(null)
@@ -24,13 +24,12 @@ export default function Logs() {
     } finally {
       setLoading(false)
     }
-  }
+  }, [lines])
 
   useEffect(() => {
     // Authentication disabled - load logs for all
     loadLogs()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [lines])
+  }, [loadLogs])
 
   useEffect(() => {
     if (autoRefresh) {
@@ -40,7 +39,7 @@ export default function Logs() {
 
       return () => clearInterval(interval)
     }
-  }, [autoRefresh, lines])
+  }, [autoRefresh, loadLogs])
 
   const downloadLogs = () => {
     const content = logs.join('\n')
@@ -157,4 +156,3 @@ export default function Logs() {
     </div>
   )
 }
-
