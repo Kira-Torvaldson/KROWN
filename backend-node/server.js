@@ -86,6 +86,10 @@ async function ensureAgentRunning() {
                 detached: true,
                 stdio: 'ignore'
             });
+            // Ne jamais faire crasher l'API si le spawn échoue (env Windows, binaire absent, permissions, etc.)
+            agent.on('error', (err) => {
+                console.warn('[API] Impossible de démarrer automatiquement l\'agent:', err.message);
+            });
             agent.unref();
             
             // Attendre un peu que l'agent démarre
@@ -501,21 +505,35 @@ io.on('connection', (socket) => {
 });
 
 // Démarrer le serveur
-async function start() {
+export async function startServer({ port } = {}) {
     await ensureAgentRunning();
     
     const isHttps = USE_HTTPS && httpServer instanceof https.Server;
     const protocol = isHttps ? 'https' : 'http';
     const wsProtocol = isHttps ? 'wss' : 'ws';
-    const listenPort = isHttps ? HTTPS_PORT : PORT;
+    const listenPort = port !== undefined ? port : (isHttps ? HTTPS_PORT : PORT);
     
-    httpServer.listen(listenPort, () => {
-        console.log('=== Krown API Server ===');
-        console.log(`[API] Serveur démarré sur ${protocol}://localhost:${listenPort}`);
-        console.log(`[API] Agent socket: ${AGENT_SOCKET}`);
-        console.log(`[API] WebSocket disponible sur ${wsProtocol}://localhost:${listenPort}`);
+    return await new Promise((resolve, reject) => {
+        httpServer.once('error', reject);
+        httpServer.listen(listenPort, () => {
+            const addr = httpServer.address();
+            const actualPort = typeof addr === 'object' && addr ? addr.port : listenPort;
+            console.log('=== Krown API Server ===');
+            console.log(`[API] Serveur démarré sur ${protocol}://localhost:${actualPort}`);
+            console.log(`[API] Agent socket: ${AGENT_SOCKET}`);
+            console.log(`[API] WebSocket disponible sur ${wsProtocol}://localhost:${actualPort}`);
+            resolve({ port: actualPort, server: httpServer });
+        });
     });
 }
 
-start().catch(console.error);
+export async function stopServer() {
+    if (!httpServer.listening) return;
+    await new Promise((resolve) => httpServer.close(resolve));
+}
+
+// Si exécuté en CLI, démarrer normalement
+if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
+    startServer().catch(console.error);
+}
 

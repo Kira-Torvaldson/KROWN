@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import type { CreateSessionRequest, Server } from '../types'
 import { apiService } from '../services/api'
-import { Plus, Edit, Trash2, Terminal, Key, Lock } from 'lucide-react'
+import { Plus, Edit, Trash2, Terminal, Key } from 'lucide-react'
 import { getApiErrorMessage } from '../utils/apiError'
 import './ServerManager.css'
 
@@ -38,18 +38,8 @@ export default function ServerManager() {
         username: server.username,
       }
       
-      if (server.authMethod === 'password') {
-        if (server.password) {
-          requestData.password = server.password
-        }
-      } else if (server.authMethod === 'key') {
-        if (server.privateKey) {
-          requestData.private_key = server.privateKey
-        }
-        if (server.passphrase) {
-          requestData.passphrase = server.passphrase
-        }
-      }
+      if (server.privateKey) requestData.private_key = server.privateKey
+      if (server.passphrase) requestData.passphrase = server.passphrase
       
       const session = await apiService.createSession(requestData)
 
@@ -133,11 +123,7 @@ export default function ServerManager() {
                 <div className="info-row">
                   <span className="info-label">Authentification:</span>
                   <span className="info-value">
-                    {server.authMethod === 'password' ? (
-                      <><Lock size={14} /> Mot de passe</>
-                    ) : (
-                      <><Key size={14} /> Clé SSH</>
-                    )}
+                    <><Key size={14} /> Clé SSH</>
                   </span>
                 </div>
               </div>
@@ -194,8 +180,8 @@ function ServerModal({
     host: server?.host || '',
     port: server?.port || 22,
     username: server?.username || '',
-    authMethod: server?.authMethod || 'password',
-    password: server?.password || '',
+    authMethod: 'key',
+    password: '',
     privateKey: server?.privateKey || '',
     passphrase: server?.passphrase || '',
   })
@@ -258,48 +244,31 @@ function ServerModal({
           </div>
           <div className="form-group">
             <label>Méthode d'authentification</label>
-            <select
-              value={formData.authMethod}
-              onChange={(e) => setFormData({ ...formData, authMethod: e.target.value as 'password' | 'key' })}
-            >
-              <option value="password">Mot de passe</option>
+            <select value="key" disabled>
               <option value="key">Clé SSH privée</option>
             </select>
           </div>
-          {formData.authMethod === 'password' ? (
+          <>
             <div className="form-group">
-              <label>Mot de passe *</label>
-              <input
-                type="password"
-                value={formData.password}
-                onChange={(e) => setFormData({ ...formData, password: e.target.value })}
-                placeholder="••••••••"
+              <label>Clé privée SSH *</label>
+              <textarea
+                value={formData.privateKey}
+                onChange={(e) => setFormData({ ...formData, privateKey: e.target.value })}
+                placeholder="-----BEGIN OPENSSH PRIVATE KEY-----..."
+                rows={6}
                 required
               />
             </div>
-          ) : (
-            <>
-              <div className="form-group">
-                <label>Clé privée SSH *</label>
-                <textarea
-                  value={formData.privateKey}
-                  onChange={(e) => setFormData({ ...formData, privateKey: e.target.value })}
-                  placeholder="-----BEGIN OPENSSH PRIVATE KEY-----..."
-                  rows={6}
-                  required
-                />
-              </div>
-              <div className="form-group">
-                <label>Passphrase (optionnel)</label>
-                <input
-                  type="password"
-                  value={formData.passphrase}
-                  onChange={(e) => setFormData({ ...formData, passphrase: e.target.value })}
-                  placeholder="••••••••"
-                />
-              </div>
-            </>
-          )}
+            <div className="form-group">
+              <label>Passphrase (optionnel)</label>
+              <input
+                type="password"
+                value={formData.passphrase}
+                onChange={(e) => setFormData({ ...formData, passphrase: e.target.value })}
+                placeholder="••••••••"
+              />
+            </div>
+          </>
           <div className="modal-actions">
             <button type="button" className="btn-secondary" onClick={onClose}>
               Annuler

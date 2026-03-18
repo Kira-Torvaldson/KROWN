@@ -12,7 +12,7 @@
     "dev:frontend-only": "cd frontend && npm run dev",
     "dev:backend": "cd backend-node && npm run dev",
     "dev:frontend": "cd frontend && npm run dev",
-    "build": "bash ./scripts/build.sh",
+    "build": "npm run build:backend && npm run build:frontend",
     "build:backend": "cd backend-node && npm install",
     "build:frontend": "cd frontend && npm run build",
     "start": "bash ./scripts/start.sh",
