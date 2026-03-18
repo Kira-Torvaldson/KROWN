@@ -1,256 +1,232 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { Terminal as XTerm } from 'xterm'
 import { FitAddon } from 'xterm-addon-fit'
 import { WebLinksAddon } from 'xterm-addon-web-links'
 import { apiService } from '../services/api'
 import { wsService } from '../services/websocket'
-// Authentication disabled
-import { Session, CommandExecution } from '../types'
-import { ArrowLeft, Send, Trash2 } from 'lucide-react'
+import type { Session } from '../types'
 import { getApiErrorMessage } from '../utils/apiError'
+import { loadTerminalPrefs } from '../utils/terminalPrefs'
+import { ArrowLeft, Trash2 } from 'lucide-react'
 import 'xterm/css/xterm.css'
 import './Terminal.css'
 
+function decodePtyBase64(b64: string): string {
+  try {
+    const bin = atob(b64)
+    const bytes = new Uint8Array(bin.length)
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i)
+    return new TextDecoder('utf-8', { fatal: false }).decode(bytes)
+  } catch {
+    return ''
+  }
+}
+
+function formatStreamError(message: string, stage?: string) {
+  return stage ? `${message} (stage: ${stage})` : message
+}
+
 export default function Terminal() {
   const { sessionId } = useParams<{ sessionId: string }>()
-  // Authentication disabled - no token needed
   const token: string | null = null
   const navigate = useNavigate()
   const terminalRef = useRef<HTMLDivElement>(null)
   const xtermRef = useRef<XTerm | null>(null)
   const fitAddonRef = useRef<FitAddon | null>(null)
+  const shellReadyRef = useRef(false)
+  const resizeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [session, setSession] = useState<Session | null>(null)
-  const [command, setCommand] = useState('')
-  const [commandHistory, setCommandHistory] = useState<string[]>([])
-  const [historyIndex, setHistoryIndex] = useState(-1)
-  const [loading, setLoading] = useState(true)
-  const initTerminal = useCallback(() => {
-    if (!terminalRef.current) return
+  const [boot, setBoot] = useState<'loading' | 'ready' | 'fail'>('loading')
+  const [statusLine, setStatusLine] = useState('Vérification de la session…')
 
+  const sendResize = useCallback(() => {
+    const fit = fitAddonRef.current
+    if (!fit || !shellReadyRef.current) return
+    const d = fit.proposeDimensions()
+    if (d?.cols && d?.rows) {
+      wsService.sendStreamResize(d.cols, d.rows)
+    }
+  }, [])
+
+  const initTerminal = useCallback(() => {
+    if (!terminalRef.current || xtermRef.current) return
+
+    const prefs = loadTerminalPrefs()
     const xterm = new XTerm({
       theme: {
-        background: '#0f172a',
-        foreground: '#f1f5f9',
-        cursor: '#3b82f6',
+        background: prefs.themeBg,
+        foreground: prefs.themeFg,
+        cursor: prefs.themeCursor,
       },
-      fontSize: 14,
-      fontFamily: 'Monaco, Menlo, "Ubuntu Mono", monospace',
-      cursorBlink: true,
-      cursorStyle: 'block',
+      fontSize: prefs.fontSize,
+      fontFamily: prefs.fontFamily,
+      cursorBlink: prefs.cursorBlink,
+      cursorStyle: prefs.cursorStyle,
+      scrollback: prefs.scrollback,
     })
 
     const fitAddon = new FitAddon()
-    const webLinksAddon = new WebLinksAddon()
-
     xterm.loadAddon(fitAddon)
-    xterm.loadAddon(webLinksAddon)
+    xterm.loadAddon(new WebLinksAddon())
 
     xterm.open(terminalRef.current)
     fitAddon.fit()
 
-    xterm.writeln('Krown Terminal - Session SSH')
-    xterm.writeln('Tapez vos commandes dans le champ ci-dessous')
+    xterm.writeln('\x1b[90mKrown — shell SSH interactif (PTY)\x1b[0m')
     xterm.writeln('')
+
+    xterm.onData((data) => {
+      if (shellReadyRef.current) {
+        wsService.sendPtyInput(data)
+      }
+    })
 
     xtermRef.current = xterm
     fitAddonRef.current = fitAddon
 
-    const handleResize = () => {
+    const onWinResize = () => {
       fitAddon.fit()
+      if (resizeTimerRef.current) clearTimeout(resizeTimerRef.current)
+      resizeTimerRef.current = setTimeout(() => sendResize(), 120)
     }
-    window.addEventListener('resize', handleResize)
+    window.addEventListener('resize', onWinResize)
 
     return () => {
-      window.removeEventListener('resize', handleResize)
+      window.removeEventListener('resize', onWinResize)
+      if (resizeTimerRef.current) clearTimeout(resizeTimerRef.current)
     }
-  }, [])
+  }, [sendResize])
 
-  const loadSession = useCallback(async () => {
+  const connectPtyStream = useCallback((): (() => void) | void => {
     if (!sessionId) return
-    try {
-      const data = await apiService.getSession(sessionId)
-      setSession(data)
-      if (data.status !== 'connected') {
-        alert("La session n'est pas connectée")
-        navigate('/')
-      }
-    } catch (error) {
-      console.error('Failed to load session:', error)
-      navigate('/')
-    } finally {
-      setLoading(false)
-    }
-  }, [navigate, sessionId])
-
-  const connectStream = useCallback(() => {
-    if (!sessionId) return
-
+    shellReadyRef.current = false
     wsService.connectStream(sessionId, token)
 
-    const asRecord = (value: unknown): Record<string, unknown> | null =>
-      value && typeof value === 'object' ? (value as Record<string, unknown>) : null
+    const stream = wsService.streamWs
+    if (!stream) return
 
-    const pickString = (obj: Record<string, unknown> | null, key: string) =>
-      obj && typeof obj[key] === 'string' ? (obj[key] as string) : undefined
+    const onOpen = () => {
+      const fit = fitAddonRef.current
+      fit?.fit()
+      const d = fit?.proposeDimensions()
+      wsService.sendStreamInit(d?.cols ?? 80, d?.rows ?? 24)
+    }
 
-    const pickNumber = (obj: Record<string, unknown> | null, key: string) =>
-      obj && typeof obj[key] === 'number' ? (obj[key] as number) : undefined
+    if (stream.readyState === WebSocket.OPEN) {
+      onOpen()
+    } else {
+      stream.addEventListener('open', onOpen, { once: true })
+    }
 
-    wsService.on('output', (message: unknown) => {
-      const msg = asRecord(message)
-      const payload = asRecord(msg?.payload)
-      const msgSessionId = pickString(payload, 'session_id') ?? pickString(msg, 'session_id')
-      if (msgSessionId === sessionId && xtermRef.current) {
-        const stream = pickString(payload, 'stream') ?? pickString(msg, 'stream')
-        const data = pickString(payload, 'data') ?? pickString(msg, 'data') ?? ''
-        if (stream === 'stderr') {
-          xtermRef.current.write(`\x1b[31m${data}\x1b[0m`)
-        } else {
-          xtermRef.current.write(data)
+    const asRec = (v: unknown): Record<string, unknown> | null =>
+      v && typeof v === 'object' ? (v as Record<string, unknown>) : null
+
+    const unsubs: Array<() => void> = []
+    unsubs.push(
+      wsService.on('pty', (msg: unknown) => {
+        const m = asRec(msg)
+        const b64 = typeof m?.data === 'string' ? m.data : ''
+        if (b64 && xtermRef.current) {
+          xtermRef.current.write(decodePtyBase64(b64))
         }
-      }
-    })
-
-    wsService.on('command_complete', (message: unknown) => {
-      const msg = asRecord(message)
-      const payload = asRecord(msg?.payload)
-      const msgSessionId = pickString(payload, 'session_id') ?? pickString(msg, 'session_id')
-      if (msgSessionId === sessionId && xtermRef.current) {
-        const exitCode = pickNumber(payload, 'exit_code') ?? pickNumber(msg, 'exit_code')
-        xtermRef.current.write(`\r\n[Commande terminée avec le code: ${exitCode ?? 'N/A'}]\r\n`)
-        xtermRef.current.write('$ ')
-      }
-    })
-
-    wsService.on('session_status', (message: unknown) => {
-      const msg = asRecord(message)
-      const payload = asRecord(msg?.payload)
-      const msgSessionId = pickString(payload, 'session_id') ?? pickString(msg, 'session_id')
-      if (msgSessionId === sessionId) {
-        const status = pickString(payload, 'status') ?? pickString(msg, 'status')
-        if (status === 'disconnected' || status === 'error') {
-          xtermRef.current?.write('\r\n[Session fermée]\r\n')
-          setSession((prev) => (prev ? { ...prev, status } : null))
-        }
-      }
-    })
-
-    wsService.on('error', (message: unknown) => {
-      const msg = asRecord(message)
-      const payload = asRecord(msg?.payload)
-      const errMsg = pickString(msg, 'message') ?? pickString(payload, 'message') ?? 'Erreur inconnue'
-      xtermRef.current?.write(`\r\n[Erreur: ${errMsg}]\r\n`)
-      xtermRef.current?.write('$ ')
-    })
-
-    wsService.on('welcome', (message: unknown) => {
-      const msg = asRecord(message)
-      const payload = asRecord(msg?.payload)
-      const welcomeMsg = pickString(msg, 'message') ?? pickString(payload, 'message')
-      if (welcomeMsg) {
-        xtermRef.current?.write(`\r\n${welcomeMsg}\r\n`)
-        xtermRef.current?.write('$ ')
-      }
-    })
-  }, [sessionId, token])
+      }),
+    )
+    unsubs.push(
+      wsService.on('shell_ready', () => {
+        shellReadyRef.current = true
+        setStatusLine('Shell prêt')
+        sendResize()
+      }),
+    )
+    unsubs.push(
+      wsService.on('pty_eof', () => {
+        shellReadyRef.current = false
+        setStatusLine('Shell fermé (EOF)')
+        xtermRef.current?.write('\r\n\x1b[33m[Session shell terminée]\x1b[0m\r\n')
+      }),
+    )
+    unsubs.push(
+      wsService.on('error', (msg: unknown) => {
+        const m = asRec(msg)
+        const err =
+          (typeof m?.message === 'string' ? m.message : null) ||
+          (typeof (asRec(m?.payload)?.message) === 'string'
+            ? (asRec(m?.payload)?.message as string)
+            : 'Erreur stream')
+        const stage = typeof m?.stage === 'string' ? m.stage : undefined
+        const line = formatStreamError(err, stage)
+        setStatusLine(`Erreur: ${line}`)
+        xtermRef.current?.write(`\r\n\x1b[31m[${line}]\x1b[0m\r\n`)
+      }),
+    )
+    return () => {
+      unsubs.forEach((u) => u())
+    }
+  }, [sessionId, token, sendResize])
 
   useEffect(() => {
     if (!sessionId) return
+    let cancelled = false
 
-    const cleanupResize = initTerminal()
-    void loadSession()
-    connectStream()
+    ;(async () => {
+      try {
+        const data = await apiService.getSession(sessionId)
+        if (cancelled) return
+        if (data.status !== 'connected') {
+          setStatusLine('Session non connectée')
+          alert("La session n'est pas connectée ou a été fermée.")
+          navigate('/')
+          setBoot('fail')
+          return
+        }
+        setSession(data)
+        setBoot('ready')
+        setStatusLine('Ouverture du terminal…')
+      } catch (e) {
+        if (!cancelled) {
+          alert(getApiErrorMessage(e, 'Impossible de charger la session'))
+          navigate('/')
+          setBoot('fail')
+        }
+      }
+    })()
 
     return () => {
+      cancelled = true
+    }
+  }, [navigate, sessionId])
+
+  useLayoutEffect(() => {
+    if (boot !== 'ready' || !sessionId) return
+    const el = terminalRef.current
+    if (!el) return
+
+    const cleanupWin = initTerminal()
+    const unsubWs = connectPtyStream()
+
+    return () => {
+      shellReadyRef.current = false
+      unsubWs?.()
       wsService.disconnectStream()
       if (xtermRef.current) {
         xtermRef.current.dispose()
+        xtermRef.current = null
+        fitAddonRef.current = null
       }
-      cleanupResize?.()
+      cleanupWin?.()
     }
-  }, [connectStream, initTerminal, loadSession, sessionId])
-
-  const executeCommand = async () => {
-    if (!command.trim() || !sessionId) return
-
-    const cmd = command.trim()
-    setCommandHistory((prev) => [...prev, cmd])
-    setHistoryIndex(-1)
-
-    if (xtermRef.current) {
-      xtermRef.current.write(`\r\n$ ${cmd}\r\n`)
-    }
-
-    // Send command via WebSocket stream for real-time output
-    if (wsService.streamWs?.readyState === WebSocket.OPEN) {
-      wsService.sendStreamCommand(cmd)
-    } else {
-      // Fallback to REST API if WebSocket is not available
-      try {
-        const result: CommandExecution = await apiService.executeCommand(sessionId, cmd)
-
-        if (xtermRef.current) {
-          if (result.stdout) {
-            xtermRef.current.write(result.stdout)
-          }
-          if (result.stderr) {
-            xtermRef.current.write(`\r\n[stderr]\r\n${result.stderr}`)
-          }
-          if (result.exit_code !== undefined) {
-            xtermRef.current.write(`\r\n[Code de sortie: ${result.exit_code}]\r\n`)
-          }
-          xtermRef.current.write('$ ')
-        }
-      } catch (err: unknown) {
-        if (xtermRef.current) {
-          xtermRef.current.write(`\r\n[Erreur: ${getApiErrorMessage(err, 'Erreur inconnue')}]\r\n`)
-          xtermRef.current.write('$ ')
-        }
-      }
-    }
-
-    setCommand('')
-  }
-
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault()
-      executeCommand()
-    } else if (e.key === 'ArrowUp') {
-      e.preventDefault()
-      if (commandHistory.length > 0) {
-        const newIndex = historyIndex === -1 ? commandHistory.length - 1 : Math.max(0, historyIndex - 1)
-        setHistoryIndex(newIndex)
-        setCommand(commandHistory[newIndex])
-      }
-    } else if (e.key === 'ArrowDown') {
-      e.preventDefault()
-      if (historyIndex !== -1) {
-        const newIndex = historyIndex + 1
-        if (newIndex >= commandHistory.length) {
-          setHistoryIndex(-1)
-          setCommand('')
-        } else {
-          setHistoryIndex(newIndex)
-          setCommand(commandHistory[newIndex])
-        }
-      }
-    }
-  }
+  }, [boot, sessionId, connectPtyStream, initTerminal])
 
   const clearTerminal = () => {
-    if (xtermRef.current) {
-      xtermRef.current.clear()
-      xtermRef.current.write('$ ')
-    }
+    xtermRef.current?.clear()
   }
 
-  if (loading) {
-    return <div className="loading">Chargement de la session...</div>
+  if (boot === 'loading') {
+    return <div className="loading">Chargement de la session…</div>
   }
 
-  if (!session) {
+  if (boot === 'fail' || !session) {
     return null
   }
 
@@ -267,9 +243,12 @@ export default function Terminal() {
             <span className={`session-status ${session.status}`}>
               {session.status === 'connected' ? '● Connecté' : '○ Déconnecté'}
             </span>
+            <span className="terminal-status-hint" title="État du canal PTY">
+              {statusLine}
+            </span>
           </div>
         </div>
-        <button className="clear-button" onClick={clearTerminal} title="Effacer le terminal">
+        <button className="clear-button" onClick={clearTerminal} title="Effacer l’affichage">
           <Trash2 size={18} />
         </button>
       </div>
@@ -278,20 +257,8 @@ export default function Terminal() {
         <div ref={terminalRef} className="xterm-wrapper" />
       </div>
 
-      <div className="command-input-container">
-        <div className="command-prompt">$</div>
-        <input
-          type="text"
-          className="command-input"
-          value={command}
-          onChange={(e) => setCommand(e.target.value)}
-          onKeyDown={handleKeyDown}
-          placeholder="Tapez une commande..."
-          autoFocus
-        />
-        <button className="send-button" onClick={executeCommand} disabled={!command.trim()}>
-          <Send size={18} />
-        </button>
+      <div className="terminal-footer-hint">
+        Clavier direct dans le terminal · Redimensionnement synchronisé avec le PTY distant
       </div>
     </div>
   )

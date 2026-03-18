@@ -50,6 +50,7 @@ export interface LoginResponse {
   user: User
 }
 
+/** Payload POST /api/sessions (snake_case côté fil JSON, aligné backend) */
 export interface CreateSessionRequest {
   host: string
   port?: number
@@ -64,12 +65,15 @@ export interface ExecuteCommandRequest {
   timeout_secs?: number
 }
 
+/** API REST serveurs : préférer auth_method + private_key si backend snake_case */
 export interface CreateServerRequest {
   name: string
   host: string
   port?: number
   username: string
-  auth_method: string
+  /** Alias UI camelCase ; envoyer `key` pour auth par clé */
+  authMethod?: 'password' | 'key'
+  auth_method?: string
   password?: string
   private_key?: string
   passphrase?: string
@@ -80,6 +84,7 @@ export interface UpdateServerRequest {
   host?: string
   port?: number
   username?: string
+  authMethod?: 'password' | 'key'
   auth_method?: string
   password?: string
   private_key?: string

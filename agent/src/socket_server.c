@@ -119,7 +119,6 @@ int socket_server_accept(int server_fd) {
         return -1;
     }
 
-    printf("[Socket] Nouvelle connexion acceptée (fd=%d)\n", client_fd);
     return client_fd;
 }
 

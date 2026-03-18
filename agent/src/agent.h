@@ -18,7 +18,12 @@ typedef enum {
     CMD_SSH_DISCONNECT = 3,
     CMD_SSH_EXECUTE = 4,
     CMD_SSH_STATUS = 5,
-    CMD_LIST_SESSIONS = 6
+    CMD_LIST_SESSIONS = 6,
+    CMD_SSH_SHELL_START = 7,
+    CMD_SSH_SHELL_WRITE = 8,
+    CMD_SSH_SHELL_READ = 9,
+    CMD_SSH_SHELL_RESIZE = 10,
+    CMD_SSH_SHELL_CLOSE = 11
 } command_type_t;
 
 // Codes de réponse

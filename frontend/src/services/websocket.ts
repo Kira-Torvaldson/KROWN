@@ -155,17 +155,7 @@ export class WebSocketService {
 
     this.streamWs.onclose = () => {
       console.log('WebSocket stream disconnected')
-      this.attemptReconnectStream(sessionId)
-    }
-  }
-
-  private attemptReconnectStream(sessionId: string) {
-    if (this.reconnectAttempts < this.maxReconnectAttempts) {
-      this.reconnectAttempts++
-      setTimeout(() => {
-        console.log(`Reconnecting stream... (attempt ${this.reconnectAttempts})`)
-        this.connectStream(sessionId, this.token)
-      }, this.reconnectDelay * this.reconnectAttempts)
+      /* Pas de reconnexion auto : le shell PTY distant serait perdu */
     }
   }
 
@@ -174,6 +164,25 @@ export class WebSocketService {
       this.streamWs.send(JSON.stringify({ command }))
     } else {
       console.warn('Stream WebSocket is not open')
+    }
+  }
+
+  /** Démarre le shell PTY distant (cols/rows du terminal) */
+  sendStreamInit(cols: number, rows: number) {
+    if (this.streamWs?.readyState === WebSocket.OPEN) {
+      this.streamWs.send(JSON.stringify({ type: 'init', cols, rows }))
+    }
+  }
+
+  sendPtyInput(data: string) {
+    if (this.streamWs?.readyState === WebSocket.OPEN) {
+      this.streamWs.send(JSON.stringify({ type: 'input', data }))
+    }
+  }
+
+  sendStreamResize(cols: number, rows: number) {
+    if (this.streamWs?.readyState === WebSocket.OPEN) {
+      this.streamWs.send(JSON.stringify({ type: 'resize', cols, rows }))
     }
   }
 

@@ -59,6 +59,9 @@ typedef struct {
     bool connected;
     time_t created_at;
     pthread_mutex_t mutex; // protège session/connected
+    ssh_channel shell_ch;
+    bool shell_active;
+    pthread_mutex_t shell_ch_mutex;
 } ssh_session_t;
 
 static ssh_session_t sessions[MAX_SESSIONS];
@@ -147,6 +150,9 @@ int ssh_handler_init(void) {
     session_count = 0;
     for (int i = 0; i < MAX_SESSIONS; i++) {
         pthread_mutex_init(&sessions[i].mutex, NULL);
+        pthread_mutex_init(&sessions[i].shell_ch_mutex, NULL);
+        sessions[i].shell_ch = NULL;
+        sessions[i].shell_active = false;
     }
 
     printf("[SSH] Gestionnaire initialisé\n");
@@ -162,6 +168,15 @@ void ssh_handler_cleanup(void) {
     // Fermer toutes les sessions
     for (int i = 0; i < session_count; i++) {
         pthread_mutex_lock(&sessions[i].mutex);
+        pthread_mutex_lock(&sessions[i].shell_ch_mutex);
+        if (sessions[i].shell_ch) {
+            ssh_channel_send_eof(sessions[i].shell_ch);
+            ssh_channel_close(sessions[i].shell_ch);
+            ssh_channel_free(sessions[i].shell_ch);
+            sessions[i].shell_ch = NULL;
+            sessions[i].shell_active = false;
+        }
+        pthread_mutex_unlock(&sessions[i].shell_ch_mutex);
         if (sessions[i].connected && sessions[i].session) {
             ssh_disconnect(sessions[i].session);
             ssh_free(sessions[i].session);
@@ -503,6 +518,16 @@ response_code_t handle_ssh_disconnect(const char *json_data, char **response) {
         return RESP_ERROR;
     }
 
+    pthread_mutex_lock(&sess->shell_ch_mutex);
+    if (sess->shell_ch) {
+        ssh_channel_send_eof(sess->shell_ch);
+        ssh_channel_close(sess->shell_ch);
+        ssh_channel_free(sess->shell_ch);
+        sess->shell_ch = NULL;
+        sess->shell_active = false;
+    }
+    pthread_mutex_unlock(&sess->shell_ch_mutex);
+
     sess->connected = false;
     ssh_disconnect(sess->session);
     ssh_free(sess->session);
@@ -759,3 +784,396 @@ response_code_t handle_list_sessions(char **response) {
     return RESP_OK;
 }
 
+/* --- Shell PTY interactif (full-duplex via poll read / write) --- */
+
+static char *b64_encode(const unsigned char *data, size_t len) {
+    static const char tbl[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    size_t olen = 4 * ((len + 2) / 3);
+    char *out = malloc(olen + 1);
+    if (!out) return NULL;
+    size_t i = 0, j = 0;
+    while (i < len) {
+        size_t chunk = len - i;
+        if (chunk > 3) chunk = 3;
+        unsigned c0 = data[i];
+        unsigned c1 = chunk > 1 ? data[i + 1] : 0;
+        unsigned c2 = chunk > 2 ? data[i + 2] : 0;
+        out[j++] = tbl[c0 >> 2];
+        out[j++] = tbl[((c0 & 3) << 4) | (c1 >> 4)];
+        if (chunk < 2) {
+            out[j++] = '=';
+            out[j++] = '=';
+            break;
+        }
+        out[j++] = tbl[((c1 & 15) << 2) | (c2 >> 6)];
+        if (chunk < 3) {
+            out[j++] = '=';
+            break;
+        }
+        out[j++] = tbl[c2 & 63];
+        i += 3;
+    }
+    out[j] = '\0';
+    return out;
+}
+
+/* Ordre libssh : open_session → request_pty → request_pty_size(cols,rows) → shell/exec */
+static int open_shell_channel(ssh_session ssh, int cols, int rows,
+                              ssh_channel *out_ch, char *which, size_t which_len) {
+    const char *try_exec[] = { "bash -l", "bash", "sh -l", "sh" };
+    int cw = cols > 0 ? cols : 80;
+    int rh = rows > 0 ? rows : 24;
+    for (size_t t = 0; t < sizeof(try_exec) / sizeof(try_exec[0]); t++) {
+        ssh_channel ch = ssh_channel_new(ssh);
+        if (!ch) continue;
+        if (ssh_channel_open_session(ch) != SSH_OK) {
+            ssh_channel_free(ch);
+            continue;
+        }
+        if (ssh_channel_request_pty(ch) != SSH_OK) {
+            ssh_channel_close(ch);
+            ssh_channel_free(ch);
+            continue;
+        }
+        (void)ssh_channel_request_pty_size(ch, cw, rh);
+        if (ssh_channel_request_exec(ch, try_exec[t]) == SSH_OK) {
+            *out_ch = ch;
+            snprintf(which, which_len, "%s", try_exec[t]);
+            return 0;
+        }
+        ssh_channel_close(ch);
+        ssh_channel_free(ch);
+    }
+    ssh_channel ch = ssh_channel_new(ssh);
+    if (!ch) return -1;
+    if (ssh_channel_open_session(ch) != SSH_OK) {
+        ssh_channel_free(ch);
+        return -1;
+    }
+    if (ssh_channel_request_pty(ch) != SSH_OK) {
+        ssh_channel_close(ch);
+        ssh_channel_free(ch);
+        return -1;
+    }
+    (void)ssh_channel_request_pty_size(ch, cw, rh);
+    if (ssh_channel_request_shell(ch) == SSH_OK) {
+        *out_ch = ch;
+        snprintf(which, which_len, "login_shell");
+        return 0;
+    }
+    ssh_channel_close(ch);
+    ssh_channel_free(ch);
+    return -1;
+}
+
+response_code_t handle_ssh_shell_start(const char *json_data, char **response) {
+    json_object *root = json_tokener_parse(json_data);
+    if (!root) {
+        *response = json_error("JSON invalide");
+        return RESP_INVALID_JSON;
+    }
+    json_object *sid, *cols_o, *rows_o;
+    json_object_object_get_ex(root, "session_id", &sid);
+    if (!sid) {
+        json_object_put(root);
+        *response = json_error("session_id requis");
+        return RESP_ERROR;
+    }
+    const char *session_id = json_object_get_string(sid);
+    int cols = 80, rows = 24;
+    if (json_object_object_get_ex(root, "cols", &cols_o) && cols_o)
+        cols = json_object_get_int(cols_o);
+    if (json_object_object_get_ex(root, "rows", &rows_o) && rows_o)
+        rows = json_object_get_int(rows_o);
+    if (cols < 20) cols = 80;
+    if (cols > 500) cols = 500;
+    if (rows < 5) rows = 24;
+    if (rows > 200) rows = 200;
+
+    pthread_mutex_lock(&sessions_mutex);
+    ssh_session_t *sess = find_session_locked(session_id);
+    if (!sess) {
+        pthread_mutex_unlock(&sessions_mutex);
+        json_object_put(root);
+        *response = json_error("Session introuvable");
+        return RESP_ERROR;
+    }
+    pthread_mutex_lock(&sess->mutex);
+    pthread_mutex_unlock(&sessions_mutex);
+
+    if (!sess->connected || !sess->session) {
+        pthread_mutex_unlock(&sess->mutex);
+        json_object_put(root);
+        *response = json_error("Session non connectée");
+        return RESP_ERROR;
+    }
+
+    pthread_mutex_lock(&sess->shell_ch_mutex);
+    if (sess->shell_ch) {
+        ssh_channel_send_eof(sess->shell_ch);
+        ssh_channel_close(sess->shell_ch);
+        ssh_channel_free(sess->shell_ch);
+        sess->shell_ch = NULL;
+        sess->shell_active = false;
+    }
+
+    ssh_channel ch = NULL;
+    char which[64];
+    if (open_shell_channel(sess->session, cols, rows, &ch, which, sizeof(which)) != 0) {
+        pthread_mutex_unlock(&sess->shell_ch_mutex);
+        pthread_mutex_unlock(&sess->mutex);
+        json_object_put(root);
+        *response = json_error("Impossible d'ouvrir un shell distant");
+        return RESP_SSH_ERROR;
+    }
+    sess->shell_ch = ch;
+    sess->shell_active = true;
+    pthread_mutex_unlock(&sess->shell_ch_mutex);
+    pthread_mutex_unlock(&sess->mutex);
+
+    json_object *obj = json_object_new_object();
+    json_object_object_add(obj, "status", json_object_new_string("shell_ready"));
+    json_object_object_add(obj, "shell", json_object_new_string(which));
+    const char *s = json_object_to_json_string_ext(obj, JSON_C_TO_STRING_PLAIN);
+    *response = strdup(s);
+    json_object_put(obj);
+    json_object_put(root);
+    return RESP_OK;
+}
+
+response_code_t handle_ssh_shell_write(const char *json_data, char **response) {
+    json_object *root = json_tokener_parse(json_data);
+    if (!root) {
+        *response = json_error("JSON invalide");
+        return RESP_INVALID_JSON;
+    }
+    json_object *sid, *data_o;
+    json_object_object_get_ex(root, "session_id", &sid);
+    json_object_object_get_ex(root, "data", &data_o);
+    if (!sid || !data_o) {
+        json_object_put(root);
+        *response = json_error("session_id et data requis");
+        return RESP_ERROR;
+    }
+    const char *session_id = json_object_get_string(sid);
+    const char *data = json_object_get_string(data_o);
+    size_t len = data ? strlen(data) : 0;
+    if (len > 65536) {
+        json_object_put(root);
+        *response = json_error("data trop grande");
+        return RESP_ERROR;
+    }
+
+    pthread_mutex_lock(&sessions_mutex);
+    ssh_session_t *sess = find_session_locked(session_id);
+    if (!sess) {
+        pthread_mutex_unlock(&sessions_mutex);
+        json_object_put(root);
+        *response = json_error("Session introuvable");
+        return RESP_ERROR;
+    }
+    pthread_mutex_lock(&sess->mutex);
+    pthread_mutex_unlock(&sessions_mutex);
+
+    pthread_mutex_lock(&sess->shell_ch_mutex);
+    if (!sess->shell_active || !sess->shell_ch) {
+        pthread_mutex_unlock(&sess->shell_ch_mutex);
+        pthread_mutex_unlock(&sess->mutex);
+        json_object_put(root);
+        *response = json_error("Shell non actif");
+        return RESP_ERROR;
+    }
+    size_t off = 0;
+    while (off < len) {
+        int w = ssh_channel_write(sess->shell_ch, data + off, (uint32_t)(len - off));
+        if (w <= 0) break;
+        off += (size_t)w;
+    }
+    pthread_mutex_unlock(&sess->shell_ch_mutex);
+    pthread_mutex_unlock(&sess->mutex);
+
+    json_object *obj = json_object_new_object();
+    json_object_object_add(obj, "written", json_object_new_int64((int64_t)off));
+    const char *s = json_object_to_json_string_ext(obj, JSON_C_TO_STRING_PLAIN);
+    *response = strdup(s);
+    json_object_put(obj);
+    json_object_put(root);
+    return RESP_OK;
+}
+
+response_code_t handle_ssh_shell_read(const char *json_data, char **response) {
+    json_object *root = json_tokener_parse(json_data);
+    if (!root) {
+        *response = json_error("JSON invalide");
+        return RESP_INVALID_JSON;
+    }
+    json_object *sid, *max_o, *to_o;
+    json_object_object_get_ex(root, "session_id", &sid);
+    if (!sid) {
+        json_object_put(root);
+        *response = json_error("session_id requis");
+        return RESP_ERROR;
+    }
+    const char *session_id = json_object_get_string(sid);
+    int max_bytes = 16384;
+    int timeout_ms = 200;
+    if (json_object_object_get_ex(root, "max_bytes", &max_o) && max_o)
+        max_bytes = json_object_get_int(max_o);
+    if (json_object_object_get_ex(root, "timeout_ms", &to_o) && to_o)
+        timeout_ms = json_object_get_int(to_o);
+    if (max_bytes < 1) max_bytes = 4096;
+    if (max_bytes > 65536) max_bytes = 65536;
+    if (timeout_ms < 1) timeout_ms = 50;
+    if (timeout_ms > 60000) timeout_ms = 60000;
+
+    pthread_mutex_lock(&sessions_mutex);
+    ssh_session_t *sess = find_session_locked(session_id);
+    if (!sess) {
+        pthread_mutex_unlock(&sessions_mutex);
+        json_object_put(root);
+        *response = json_error("Session introuvable");
+        return RESP_ERROR;
+    }
+    pthread_mutex_lock(&sess->mutex);
+    pthread_mutex_unlock(&sessions_mutex);
+
+    unsigned char *buf = malloc((size_t)max_bytes + 1);
+    if (!buf) {
+        pthread_mutex_unlock(&sess->mutex);
+        json_object_put(root);
+        *response = json_error("Mémoire");
+        return RESP_ERROR;
+    }
+
+    pthread_mutex_lock(&sess->shell_ch_mutex);
+    if (!sess->shell_active || !sess->shell_ch) {
+        pthread_mutex_unlock(&sess->shell_ch_mutex);
+        pthread_mutex_unlock(&sess->mutex);
+        free(buf);
+        json_object_put(root);
+        *response = json_error("Shell non actif");
+        return RESP_ERROR;
+    }
+    int n = ssh_channel_read_timeout(sess->shell_ch, (char *)buf, (uint32_t)max_bytes, 0, timeout_ms);
+    bool eof = false;
+    if (n == SSH_ERROR) n = 0;
+    if (n == 0 && ssh_channel_is_eof(sess->shell_ch))
+        eof = true;
+    pthread_mutex_unlock(&sess->shell_ch_mutex);
+    pthread_mutex_unlock(&sess->mutex);
+
+    char *b64 = (n > 0) ? b64_encode(buf, (size_t)n) : strdup("");
+    free(buf);
+    if (!b64) {
+        json_object_put(root);
+        *response = json_error("Encodage");
+        return RESP_ERROR;
+    }
+
+    json_object *obj = json_object_new_object();
+    json_object_object_add(obj, "data", json_object_new_string(b64));
+    json_object_object_add(obj, "eof", json_object_new_boolean(eof));
+    free(b64);
+    const char *s = json_object_to_json_string_ext(obj, JSON_C_TO_STRING_PLAIN);
+    *response = strdup(s);
+    json_object_put(obj);
+    json_object_put(root);
+    return RESP_OK;
+}
+
+response_code_t handle_ssh_shell_resize(const char *json_data, char **response) {
+    json_object *root = json_tokener_parse(json_data);
+    if (!root) {
+        *response = json_error("JSON invalide");
+        return RESP_INVALID_JSON;
+    }
+    json_object *sid, *cols_o, *rows_o;
+    json_object_object_get_ex(root, "session_id", &sid);
+    json_object_object_get_ex(root, "cols", &cols_o);
+    json_object_object_get_ex(root, "rows", &rows_o);
+    if (!sid || !cols_o || !rows_o) {
+        json_object_put(root);
+        *response = json_error("session_id, cols, rows requis");
+        return RESP_ERROR;
+    }
+    const char *session_id = json_object_get_string(sid);
+    int cols = json_object_get_int(cols_o);
+    int rows = json_object_get_int(rows_o);
+    if (cols < 20) cols = 80;
+    if (cols > 500) cols = 500;
+    if (rows < 5) rows = 24;
+    if (rows > 200) rows = 200;
+
+    pthread_mutex_lock(&sessions_mutex);
+    ssh_session_t *sess = find_session_locked(session_id);
+    if (!sess) {
+        pthread_mutex_unlock(&sessions_mutex);
+        json_object_put(root);
+        *response = json_error("Session introuvable");
+        return RESP_ERROR;
+    }
+    pthread_mutex_lock(&sess->mutex);
+    pthread_mutex_unlock(&sessions_mutex);
+
+    pthread_mutex_lock(&sess->shell_ch_mutex);
+    if (!sess->shell_active || !sess->shell_ch) {
+        pthread_mutex_unlock(&sess->shell_ch_mutex);
+        pthread_mutex_unlock(&sess->mutex);
+        json_object_put(root);
+        *response = json_error("Shell non actif");
+        return RESP_ERROR;
+    }
+    int rc = ssh_channel_change_pty_size(sess->shell_ch, cols, rows);
+    pthread_mutex_unlock(&sess->shell_ch_mutex);
+    pthread_mutex_unlock(&sess->mutex);
+
+    json_object *obj = json_object_new_object();
+    json_object_object_add(obj, "ok", json_object_new_boolean(rc == SSH_OK));
+    const char *s = json_object_to_json_string_ext(obj, JSON_C_TO_STRING_PLAIN);
+    *response = strdup(s);
+    json_object_put(obj);
+    json_object_put(root);
+    return RESP_OK;
+}
+
+response_code_t handle_ssh_shell_close(const char *json_data, char **response) {
+    json_object *root = json_tokener_parse(json_data);
+    if (!root) {
+        *response = json_error("JSON invalide");
+        return RESP_INVALID_JSON;
+    }
+    json_object *sid;
+    json_object_object_get_ex(root, "session_id", &sid);
+    if (!sid) {
+        json_object_put(root);
+        *response = json_error("session_id requis");
+        return RESP_ERROR;
+    }
+    const char *session_id = json_object_get_string(sid);
+
+    pthread_mutex_lock(&sessions_mutex);
+    ssh_session_t *sess = find_session_locked(session_id);
+    if (!sess) {
+        pthread_mutex_unlock(&sessions_mutex);
+        json_object_put(root);
+        *response = strdup("{\"closed\":true,\"note\":\"session_inconnue\"}");
+        return RESP_OK;
+    }
+    pthread_mutex_lock(&sess->mutex);
+    pthread_mutex_unlock(&sessions_mutex);
+
+    pthread_mutex_lock(&sess->shell_ch_mutex);
+    if (sess->shell_ch) {
+        ssh_channel_send_eof(sess->shell_ch);
+        ssh_channel_close(sess->shell_ch);
+        ssh_channel_free(sess->shell_ch);
+        sess->shell_ch = NULL;
+        sess->shell_active = false;
+    }
+    pthread_mutex_unlock(&sess->shell_ch_mutex);
+    pthread_mutex_unlock(&sess->mutex);
+
+    *response = strdup("{\"closed\":true}");
+    json_object_put(root);
+    return RESP_OK;
+}

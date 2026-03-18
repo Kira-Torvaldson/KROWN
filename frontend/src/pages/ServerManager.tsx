@@ -33,9 +33,9 @@ export default function ServerManager() {
     setLoading(true)
     try {
       const requestData: CreateSessionRequest = {
-        host: server.host,
-        port: server.port,
-        username: server.username,
+        host: server.host.trim(),
+        port: Number(server.port) > 0 && Number(server.port) <= 65535 ? Number(server.port) : 22,
+        username: server.username.trim(),
       }
       
       if (server.privateKey) requestData.private_key = server.privateKey

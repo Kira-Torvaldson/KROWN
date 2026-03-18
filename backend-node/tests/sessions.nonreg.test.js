@@ -44,19 +44,38 @@ async function main() {
   try {
     await startServer({ port: PORT })
 
-    // 1) Payload invalide -> 400 + message clair (+ stage si présent)
+    // 1) Payload invalide -> 400 + stage payload_validation
     const invalid = await postJson('/api/sessions', { host: '', username: '' })
     if (invalid.status !== 400) {
       throw new Error(`Attendu 400 pour payload invalide, reçu ${invalid.status}. Body=${JSON.stringify(invalid.json)}`)
     }
-    if (
-      !invalid.json ||
-      (typeof invalid.json.error !== 'string' && typeof invalid.json.message !== 'string')
-    ) {
-      throw new Error(`Réponse 400 attendue avec message, reçu: ${JSON.stringify(invalid.json)}`)
+    if (!invalid.json || typeof invalid.json.error !== 'string') {
+      throw new Error(`Réponse 400 avec error, reçu: ${JSON.stringify(invalid.json)}`)
+    }
+    if (invalid.json.stage !== 'payload_validation') {
+      throw new Error(`Attendu stage payload_validation, reçu ${invalid.json.stage}`)
     }
 
-    // 2) Payload valide-shape -> pas 400 (503 acceptable si agent absent)
+    // 2) Mot de passe refusé -> 400 policy_password (pas de fuite du secret dans la réponse)
+    const pwd = await postJson('/api/sessions', {
+      host: 'h.example',
+      username: 'u',
+      password: 'secret-password-never-echo',
+    })
+    if (pwd.status !== 400 || pwd.json?.stage !== 'policy_password') {
+      throw new Error(`Attendu 400 policy_password pour password, reçu ${pwd.status} ${JSON.stringify(pwd.json)}`)
+    }
+    if (JSON.stringify(pwd.json).includes('secret-password')) {
+      throw new Error('Le mot de passe ne doit pas être renvoyé dans le JSON')
+    }
+
+    // 3) Port invalide
+    const badPort = await postJson('/api/sessions', { host: 'x', username: 'y', port: 99999 })
+    if (badPort.status !== 400 || badPort.json?.stage !== 'payload_validation') {
+      throw new Error(`Attendu 400 port, reçu ${badPort.status} ${JSON.stringify(badPort.json)}`)
+    }
+
+    // 4) Forme valide (clé) -> pas 400 (401/502/503 selon agent / réseau)
     const validShape = await postJson('/api/sessions', {
       host: 'example.com',
       port: 22,
@@ -67,7 +86,7 @@ async function main() {
       throw new Error(`Attendu pas 400 pour payload valide-shape, reçu 400. Body=${JSON.stringify(validShape.json)}`)
     }
 
-    console.log('OK: sessions payload regression test passed.')
+    console.log('OK: sessions API smoke + non-régression.')
   } finally {
     await stopServer()
     // If something failed, dump logs for diagnosis

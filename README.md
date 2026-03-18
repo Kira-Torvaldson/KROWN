@@ -460,12 +460,23 @@ curl http://localhost:8080/api/logs?lines=100
 
 Le serveur expose un WebSocket sur `ws://localhost:8080` (ou `wss://localhost:8443` en HTTPS).
 
-#### Événements disponibles
+#### Terminal interactif (PTY full-duplex)
+
+Après `POST /api/sessions`, le frontend ouvre un WebSocket dédié :
+
+`ws://<host>:<port>/api/ssh/<SESSION_ID>/stream`
+
+1. Client envoie `{"type":"init","cols":80,"rows":24}` → ouverture shell distant (agent).
+2. Serveur répond `{"event":"shell_ready"}` puis des `{"event":"pty","data":"<base64>"}`.
+3. Client envoie `{"type":"input","data":"..."}` (frappe clavier) et `{"type":"resize","cols":n,"rows":m}`.
+4. Erreurs : `{"event":"error","message":"...","stage":"..."}` (ex. `agent_unavailable`, `ssh_shell_start` / codes agent mappés).
+
+#### Socket.IO (événements généraux)
 
 - `welcome` : Message de bienvenue avec statut de l'agent
 - `session:connected` : Nouvelle session SSH connectée
 - `session:disconnected` : Session SSH fermée
-- `session:output` : Sortie d'une commande exécutée
+- `session:output` : Sortie d'une commande exécutée via REST `/execute`
 
 #### Exemple JavaScript
 
@@ -497,10 +508,10 @@ Le frontend React est disponible sur `http://localhost:3000` (ou `https://localh
 #### Fonctionnalités
 
 - **Gestion des serveurs SSH** : Ajouter, modifier, supprimer des serveurs
-- **Authentification** : Mot de passe ou clé SSH privée
+- **Authentification** : Clé SSH privée (mot de passe SSH non pris en charge par l’API)
 - **Sessions SSH** : Connexion en un clic
-- **Terminal virtuel** : Exécution de commandes en temps réel (xterm.js)
-- **WebSocket temps réel** : Affichage des sorties SSH en direct
+- **Terminal interactif** : Shell PTY distant via WebSocket (`/api/ssh/:id/stream`) + xterm.js
+- **REST execute** : Commandes ponctuelles avec sortie `output` / `stderr` (mappée `stdout` côté client)
 - **Historique** : Consultation des sessions et commandes exécutées
 - **Logs système** : Visualisation des logs de l'application
 

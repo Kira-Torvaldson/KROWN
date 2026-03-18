@@ -88,7 +88,18 @@ class ApiService {
   }
 
   async createSession(data: CreateSessionRequest): Promise<Session> {
-    const response = await this.client.post<Session>('/api/sessions', data)
+    const port =
+      typeof data.port === 'number' && Number.isFinite(data.port)
+        ? Math.min(65535, Math.max(1, Math.floor(data.port)))
+        : 22
+    const body = {
+      host: String(data.host || '').trim(),
+      port,
+      username: String(data.username || '').trim(),
+      ...(data.private_key ? { private_key: data.private_key } : {}),
+      ...(data.passphrase ? { passphrase: data.passphrase } : {}),
+    }
+    const response = await this.client.post<Session>('/api/sessions', body)
     return response.data
   }
 
@@ -97,11 +108,23 @@ class ApiService {
   }
 
   async executeCommand(sessionId: string, command: string, timeout?: number): Promise<CommandExecution> {
-    const response = await this.client.post<CommandExecution>(
+    const response = await this.client.post<Record<string, unknown>>(
       `/api/sessions/${sessionId}/execute`,
       { command, timeout_secs: timeout } as ExecuteCommandRequest
     )
-    return response.data
+    const d = response.data
+    const stdout = typeof d.output === 'string' ? d.output : typeof d.stdout === 'string' ? d.stdout : ''
+    const stderr = typeof d.stderr === 'string' ? d.stderr : ''
+    return {
+      id: typeof d.id === 'string' ? d.id : sessionId,
+      session_id: sessionId,
+      command,
+      stdout,
+      stderr,
+      exit_code: typeof d.exit_code === 'number' ? d.exit_code : undefined,
+      executed_at: new Date().toISOString(),
+      duration_ms: 0,
+    }
   }
 
   // Server endpoints

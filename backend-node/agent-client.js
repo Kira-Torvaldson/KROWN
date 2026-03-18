@@ -28,7 +28,8 @@ export class AgentClient {
     /**
      * Envoyer une commande à l'agent
      */
-    async sendCommand(cmdType, data = {}) {
+    async sendCommand(cmdType, data = {}, options = {}) {
+        const timeoutMs = typeof options.timeoutMs === 'number' ? options.timeoutMs : 30000;
         return new Promise((resolve, reject) => {
             if (!this.isAvailable()) {
                 reject(new Error(
@@ -79,11 +80,10 @@ export class AgentClient {
             let expectedDataLen = 0;
             let responseCode = null;
             
-            // Timeout pour éviter les blocages (30 secondes)
             timeout = setTimeout(() => {
                 client.destroy();
-                settleOnce(new Error('Timeout: l\'agent n\'a pas répondu dans les 30 secondes'));
-            }, 30000);
+                settleOnce(new Error(`Timeout: l'agent n'a pas répondu dans les ${timeoutMs} ms`));
+            }, timeoutMs);
 
             client.on('data', (data) => {
                 responseBuffer = Buffer.concat([responseBuffer, data]);
@@ -214,6 +214,30 @@ export class AgentClient {
     async listSessions() {
         const CMD_LIST_SESSIONS = 6;
         return this.sendCommand(CMD_LIST_SESSIONS);
+    }
+
+    async sshShellStart(sessionId, cols, rows) {
+        return this.sendCommand(7, { session_id: sessionId, cols, rows });
+    }
+
+    async sshShellWrite(sessionId, data) {
+        return this.sendCommand(8, { session_id: sessionId, data });
+    }
+
+    async sshShellRead(sessionId, maxBytes, timeoutMs) {
+        return this.sendCommand(
+            9,
+            { session_id: sessionId, max_bytes: maxBytes, timeout_ms: timeoutMs },
+            { timeoutMs: Math.min(65000, Math.max(5000, (timeoutMs || 200) + 8000)) },
+        );
+    }
+
+    async sshShellResize(sessionId, cols, rows) {
+        return this.sendCommand(10, { session_id: sessionId, cols, rows });
+    }
+
+    async sshShellClose(sessionId) {
+        return this.sendCommand(11, { session_id: sessionId });
     }
 }
 
