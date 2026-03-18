@@ -9,47 +9,44 @@ import './History.css'
 export default function History() {
   const [sessions, setSessions] = useState<Session[]>([])
   const [selectedSession, setSelectedSession] = useState<Session | null>(null)
-  const [commands] = useState<CommandExecution[]>([])
+  const [commands, setCommands] = useState<CommandExecution[]>([])
   const [loading, setLoading] = useState(true)
   const navigate = useNavigate()
 
   const loadSessions = useCallback(async () => {
     try {
       const data = await apiService.getSessions()
-      setSessions(data.sort((a, b) => 
-        new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-      ))
-      if (data.length > 0 && !selectedSession) {
-        setSelectedSession(data[0])
-      }
+      const sorted = data.sort(
+        (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+      )
+      setSessions(sorted)
+      setSelectedSession((prev) => prev ?? (sorted.length > 0 ? sorted[0] : null))
     } catch (error) {
       console.error('Failed to load sessions:', error)
     } finally {
       setLoading(false)
     }
-  }, [selectedSession])
+  }, [])
 
-  const loadCommands = useCallback(async (_sessionId: string) => {
-    // Note: L'API backend devrait avoir un endpoint pour récupérer les commandes
-    // Pour l'instant, on simule avec les données disponibles
+  const loadCommands = useCallback(async (sessionId: string) => {
     try {
-      // À implémenter : apiService.getCommandLogs(sessionId)
-      // const data = await apiService.getCommandLogs(sessionId)
-      // setCommands(data)
+      const data = await apiService.getCommandHistory(sessionId)
+      setCommands(data)
     } catch (error) {
       console.error('Failed to load commands:', error)
+      setCommands([])
     }
   }, [])
 
   useEffect(() => {
-    loadSessions()
+    void loadSessions()
   }, [loadSessions])
 
   useEffect(() => {
     if (selectedSession) {
-      loadCommands(selectedSession.id)
+      void loadCommands(selectedSession.id)
     }
-  }, [selectedSession, loadCommands])
+  }, [loadCommands, selectedSession])
 
   const getStatusColor = (status: Session['status']) => {
     switch (status) {

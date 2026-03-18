@@ -1,4 +1,3 @@
-
 export type WebSocketMessage =
   | { event: 'welcome'; message?: string; payload?: { message: string } }
   | { event: 'authenticated'; user_id?: string; username?: string; payload?: { user_id: string; username: string } }
@@ -14,7 +13,7 @@ export class WebSocketService {
   public streamWs: WebSocket | null = null
   private baseUrl: string
   private token: string | null = null
-  private listeners: Map<string, Set<(data: any) => void>> = new Map()
+  private listeners: Map<string, Set<(data: unknown) => void>> = new Map()
   private reconnectAttempts = 0
   private maxReconnectAttempts = 5
   private reconnectDelay = 1000
@@ -78,12 +77,21 @@ export class WebSocketService {
   }
 
   private handleMessage(message: WebSocketMessage) {
-    const eventType = (message as any).event || (message as any).type
+    const eventType = this.getEventType(message)
+    if (!eventType) return
     const listeners = this.listeners.get(eventType) || new Set()
     listeners.forEach((listener) => listener(message))
   }
 
-  send(data: any) {
+  private getEventType(message: unknown): string | undefined {
+    if (!message || typeof message !== 'object') return
+    const m = message as Record<string, unknown>
+    const event = typeof m.event === 'string' ? m.event : undefined
+    const type = typeof m.type === 'string' ? m.type : undefined
+    return event ?? type
+  }
+
+  send(data: unknown) {
     if (this.ws?.readyState === WebSocket.OPEN) {
       this.ws.send(JSON.stringify(data))
     } else {
@@ -98,14 +106,14 @@ export class WebSocketService {
     })
   }
 
-  on<T extends WebSocketMessage>(type: string, callback: (data: T) => void) {
+  on(type: string, callback: (data: unknown) => void) {
     if (!this.listeners.has(type)) {
       this.listeners.set(type, new Set())
     }
-    this.listeners.get(type)!.add(callback as any)
+    this.listeners.get(type)!.add(callback)
 
     return () => {
-      this.listeners.get(type)?.delete(callback as any)
+      this.listeners.get(type)?.delete(callback)
     }
   }
 
@@ -131,8 +139,9 @@ export class WebSocketService {
 
     this.streamWs.onmessage = (event) => {
       try {
-        const message = JSON.parse(event.data)
-        const eventType = message.event || message.type
+        const message: unknown = JSON.parse(event.data)
+        const eventType = this.getEventType(message)
+        if (!eventType) return
         const listeners = this.listeners.get(eventType) || new Set()
         listeners.forEach((listener) => listener(message))
       } catch (error) {

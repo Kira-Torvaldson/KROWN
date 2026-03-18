@@ -1,8 +1,9 @@
-import { useState, useEffect } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Server } from '../types'
+import type { CreateSessionRequest, Server } from '../types'
 import { apiService } from '../services/api'
 import { Plus, Edit, Trash2, Terminal, Key, Lock } from 'lucide-react'
+import { getApiErrorMessage } from '../utils/apiError'
 import './ServerManager.css'
 
 export default function ServerManager() {
@@ -12,16 +13,16 @@ export default function ServerManager() {
   const [loading, setLoading] = useState(false)
   const navigate = useNavigate()
 
-  useEffect(() => {
-    loadServers()
-  }, [])
-
-  const loadServers = () => {
+  const loadServers = useCallback(() => {
     const stored = localStorage.getItem('krown_servers')
     if (stored) {
-      setServers(JSON.parse(stored))
+      setServers(JSON.parse(stored) as Server[])
     }
-  }
+  }, [])
+
+  useEffect(() => {
+    loadServers()
+  }, [loadServers])
 
   const saveServers = (newServers: Server[]) => {
     localStorage.setItem('krown_servers', JSON.stringify(newServers))
@@ -31,9 +32,7 @@ export default function ServerManager() {
   const handleCreateSession = async (server: Server) => {
     setLoading(true)
     try {
-      // Le backend attend password et private_key directement dans le body
-      // Construire l'objet de requête sans inclure les champs undefined
-      const requestData: any = {
+      const requestData: CreateSessionRequest = {
         host: server.host,
         port: server.port,
         username: server.username,
@@ -55,10 +54,9 @@ export default function ServerManager() {
       const session = await apiService.createSession(requestData)
 
       navigate(`/terminal/${session.id}`)
-    } catch (error: any) {
-      const errorMessage = error.response?.data?.error || error.message || 'Erreur lors de la création de la session'
-      console.error('Erreur création session:', error)
-      alert(errorMessage)
+    } catch (err: unknown) {
+      console.error('Erreur création session:', err)
+      alert(getApiErrorMessage(err, 'Erreur lors de la création de la session'))
     } finally {
       setLoading(false)
     }

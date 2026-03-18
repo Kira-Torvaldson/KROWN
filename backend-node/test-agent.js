@@ -8,6 +8,7 @@ const client = new AgentClient();
 
 async function test() {
     console.log('=== Test Agent Client ===\n');
+    let failures = 0;
 
     // Test 1: Ping
     console.log('1. Test Ping...');
@@ -16,7 +17,7 @@ async function test() {
         console.log('✓ Ping réussi:', ping.data);
     } catch (error) {
         console.error('✗ Ping échoué:', error.message);
-        return;
+        failures++;
     }
 
     // Test 2: Liste des sessions
@@ -26,10 +27,20 @@ async function test() {
         console.log('✓ Sessions:', sessions.data);
     } catch (error) {
         console.error('✗ Liste sessions échouée:', error.message);
+        failures++;
     }
 
     console.log('\n=== Tests terminés ===');
+    if (failures > 0) {
+        console.error(`Échec: ${failures} test(s) en erreur.`);
+        process.exitCode = 1;
+    } else {
+        console.log('Succès: tous les tests sont passés.');
+    }
 }
 
-test().catch(console.error);
+test().catch((err) => {
+    console.error('Erreur inattendue:', err?.message || err);
+    process.exitCode = 1;
+});
 

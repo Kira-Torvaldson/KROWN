@@ -88,7 +88,7 @@ export interface UpdateServerRequest {
 
 export interface WebSocketEvent {
   event: 'welcome' | 'authenticated' | 'subscribed' | 'output' | 'command_complete' | 'session_status' | 'error' | 'pong'
-  payload?: any
+  payload?: unknown
   message?: string
   user_id?: string
   username?: string

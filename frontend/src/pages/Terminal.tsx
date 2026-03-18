@@ -8,13 +8,14 @@ import { wsService } from '../services/websocket'
 // Authentication disabled
 import { Session, CommandExecution } from '../types'
 import { ArrowLeft, Send, Trash2 } from 'lucide-react'
+import { getApiErrorMessage } from '../utils/apiError'
 import 'xterm/css/xterm.css'
 import './Terminal.css'
 
 export default function Terminal() {
   const { sessionId } = useParams<{ sessionId: string }>()
   // Authentication disabled - no token needed
-  const token = null
+  const token: string | null = null
   const navigate = useNavigate()
   const terminalRef = useRef<HTMLDivElement>(null)
   const xtermRef = useRef<XTerm | null>(null)
@@ -24,23 +25,6 @@ export default function Terminal() {
   const [commandHistory, setCommandHistory] = useState<string[]>([])
   const [historyIndex, setHistoryIndex] = useState(-1)
   const [loading, setLoading] = useState(true)
-
-  const loadSession = useCallback(async () => {
-    try {
-      const data = await apiService.getSession(sessionId!)
-      setSession(data)
-      if (data.status !== 'connected') {
-        alert('La session n\'est pas connectée')
-        navigate('/')
-      }
-    } catch (error) {
-      console.error('Failed to load session:', error)
-      navigate('/')
-    } finally {
-      setLoading(false)
-    }
-  }, [navigate, sessionId])
-
   const initTerminal = useCallback(() => {
     if (!terminalRef.current) return
 
@@ -72,7 +56,6 @@ export default function Terminal() {
     xtermRef.current = xterm
     fitAddonRef.current = fitAddon
 
-    // Handle window resize
     const handleResize = () => {
       fitAddon.fit()
     }
@@ -83,21 +66,45 @@ export default function Terminal() {
     }
   }, [])
 
+  const loadSession = useCallback(async () => {
+    if (!sessionId) return
+    try {
+      const data = await apiService.getSession(sessionId)
+      setSession(data)
+      if (data.status !== 'connected') {
+        alert("La session n'est pas connectée")
+        navigate('/')
+      }
+    } catch (error) {
+      console.error('Failed to load session:', error)
+      navigate('/')
+    } finally {
+      setLoading(false)
+    }
+  }, [navigate, sessionId])
+
   const connectStream = useCallback(() => {
     if (!sessionId) return
 
-    // Connect to stream WebSocket
     wsService.connectStream(sessionId, token)
 
-    // Listen for output events
-    wsService.on('output', (message: any) => {
-      const payload = message.payload || message
-      const msgSessionId = payload.session_id || message.session_id
+    const asRecord = (value: unknown): Record<string, unknown> | null =>
+      value && typeof value === 'object' ? (value as Record<string, unknown>) : null
+
+    const pickString = (obj: Record<string, unknown> | null, key: string) =>
+      obj && typeof obj[key] === 'string' ? (obj[key] as string) : undefined
+
+    const pickNumber = (obj: Record<string, unknown> | null, key: string) =>
+      obj && typeof obj[key] === 'number' ? (obj[key] as number) : undefined
+
+    wsService.on('output', (message: unknown) => {
+      const msg = asRecord(message)
+      const payload = asRecord(msg?.payload)
+      const msgSessionId = pickString(payload, 'session_id') ?? pickString(msg, 'session_id')
       if (msgSessionId === sessionId && xtermRef.current) {
-        const stream = payload.stream || message.stream
-        const data = payload.data || message.data
+        const stream = pickString(payload, 'stream') ?? pickString(msg, 'stream')
+        const data = pickString(payload, 'data') ?? pickString(msg, 'data') ?? ''
         if (stream === 'stderr') {
-          // Stderr in red (ANSI escape code)
           xtermRef.current.write(`\x1b[31m${data}\x1b[0m`)
         } else {
           xtermRef.current.write(data)
@@ -105,45 +112,45 @@ export default function Terminal() {
       }
     })
 
-    // Listen for command completion
-    wsService.on('command_complete', (message: any) => {
-      const payload = message.payload || message
-      const msgSessionId = payload.session_id || message.session_id
+    wsService.on('command_complete', (message: unknown) => {
+      const msg = asRecord(message)
+      const payload = asRecord(msg?.payload)
+      const msgSessionId = pickString(payload, 'session_id') ?? pickString(msg, 'session_id')
       if (msgSessionId === sessionId && xtermRef.current) {
-        const exitCode = payload.exit_code || message.exit_code
-        xtermRef.current.write(`\r\n[Commande terminée avec le code: ${exitCode}]\r\n`)
+        const exitCode = pickNumber(payload, 'exit_code') ?? pickNumber(msg, 'exit_code')
+        xtermRef.current.write(`\r\n[Commande terminée avec le code: ${exitCode ?? 'N/A'}]\r\n`)
         xtermRef.current.write('$ ')
       }
     })
 
-    // Listen for session status updates
-    wsService.on('session_status', (message: any) => {
-      const payload = message.payload || message
-      const msgSessionId = payload.session_id || message.session_id
+    wsService.on('session_status', (message: unknown) => {
+      const msg = asRecord(message)
+      const payload = asRecord(msg?.payload)
+      const msgSessionId = pickString(payload, 'session_id') ?? pickString(msg, 'session_id')
       if (msgSessionId === sessionId) {
-        const status = payload.status || message.status
+        const status = pickString(payload, 'status') ?? pickString(msg, 'status')
         if (status === 'disconnected' || status === 'error') {
-          if (xtermRef.current) {
-            xtermRef.current.write('\r\n[Session fermée]\r\n')
-          }
-          setSession((prev) => prev ? { ...prev, status } : null)
+          xtermRef.current?.write('\r\n[Session fermée]\r\n')
+          setSession((prev) => (prev ? { ...prev, status } : null))
         }
       }
     })
 
-    // Listen for errors
-    wsService.on('error', (message: any) => {
-      if (xtermRef.current) {
-        xtermRef.current.write(`\r\n[Erreur: ${message.message || message.payload?.message}]\r\n`)
-        xtermRef.current.write('$ ')
-      }
+    wsService.on('error', (message: unknown) => {
+      const msg = asRecord(message)
+      const payload = asRecord(msg?.payload)
+      const errMsg = pickString(msg, 'message') ?? pickString(payload, 'message') ?? 'Erreur inconnue'
+      xtermRef.current?.write(`\r\n[Erreur: ${errMsg}]\r\n`)
+      xtermRef.current?.write('$ ')
     })
 
-    // Listen for welcome message
-    wsService.on('welcome', (message: any) => {
-      if (xtermRef.current) {
-        xtermRef.current.write(`\r\n${message.message || message.payload?.message}\r\n`)
-        xtermRef.current.write('$ ')
+    wsService.on('welcome', (message: unknown) => {
+      const msg = asRecord(message)
+      const payload = asRecord(msg?.payload)
+      const welcomeMsg = pickString(msg, 'message') ?? pickString(payload, 'message')
+      if (welcomeMsg) {
+        xtermRef.current?.write(`\r\n${welcomeMsg}\r\n`)
+        xtermRef.current?.write('$ ')
       }
     })
   }, [sessionId, token])
@@ -151,20 +158,18 @@ export default function Terminal() {
   useEffect(() => {
     if (!sessionId) return
 
-    loadSession()
-    const cleanupTerminal = initTerminal()
+    const cleanupResize = initTerminal()
+    void loadSession()
     connectStream()
 
     return () => {
       wsService.disconnectStream()
-      if (cleanupTerminal) {
-        cleanupTerminal()
-      }
       if (xtermRef.current) {
         xtermRef.current.dispose()
       }
+      cleanupResize?.()
     }
-  }, [sessionId, loadSession, initTerminal, connectStream])
+  }, [connectStream, initTerminal, loadSession, sessionId])
 
   const executeCommand = async () => {
     if (!command.trim() || !sessionId) return
@@ -197,9 +202,9 @@ export default function Terminal() {
           }
           xtermRef.current.write('$ ')
         }
-      } catch (error: any) {
+      } catch (err: unknown) {
         if (xtermRef.current) {
-          xtermRef.current.write(`\r\n[Erreur: ${error.response?.data?.error || 'Erreur inconnue'}]\r\n`)
+          xtermRef.current.write(`\r\n[Erreur: ${getApiErrorMessage(err, 'Erreur inconnue')}]\r\n`)
           xtermRef.current.write('$ ')
         }
       }

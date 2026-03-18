@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react'
 import { useNavigate, useLocation, Link } from 'react-router-dom'
-import { useAuth } from '../contexts/AuthContext'
+import { useAuth } from '../contexts/useAuth'
 import { LogIn, Lock, User, CheckCircle } from 'lucide-react'
+import { getApiErrorMessage } from '../utils/apiError'
 import './Login.css'
 
 export default function Login() {
@@ -31,8 +32,8 @@ export default function Login() {
     try {
       await login(username, password)
       navigate('/')
-    } catch (err: any) {
-      setError(err.response?.data?.error || 'Erreur de connexion')
+    } catch (err: unknown) {
+      setError(getApiErrorMessage(err, 'Erreur de connexion'))
     } finally {
       setLoading(false)
     }

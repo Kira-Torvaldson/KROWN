@@ -13,7 +13,7 @@ export default function Dashboard() {
 
   const loadServersFromStorage = useCallback((): Server[] => {
     const stored = localStorage.getItem('krown_servers')
-    return stored ? JSON.parse(stored) : []
+    return stored ? (JSON.parse(stored) as Server[]) : []
   }, [])
 
   const loadData = useCallback(async () => {
@@ -32,7 +32,7 @@ export default function Dashboard() {
   }, [loadServersFromStorage])
 
   useEffect(() => {
-    loadData()
+    void loadData()
   }, [loadData])
 
   const getStatusColor = (status: Session['status']) => {

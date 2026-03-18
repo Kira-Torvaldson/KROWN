@@ -2,7 +2,10 @@ import { useState } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
 import { apiService } from '../services/api'
 import { UserPlus, Lock, User, Mail, AlertCircle } from 'lucide-react'
+import { getApiErrorMessage } from '../utils/apiError'
 import './Register.css'
+
+type Role = 'admin' | 'operator' | 'readonly'
 
 export default function Register() {
   const [formData, setFormData] = useState({
@@ -10,7 +13,7 @@ export default function Register() {
     password: '',
     confirmPassword: '',
     email: '',
-    role: 'operator' as 'admin' | 'operator' | 'readonly',
+    role: 'operator' as Role,
   })
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
@@ -59,10 +62,9 @@ export default function Register() {
 
       // Rediriger vers la page de connexion avec un message
       navigate('/login', { state: { message: 'Compte créé avec succès ! Vous pouvez maintenant vous connecter.' } })
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('Registration error:', err)
-      const errorMessage = err.response?.data?.error || err.message || 'Erreur lors de la création du compte'
-      setError(errorMessage)
+      setError(getApiErrorMessage(err, 'Erreur lors de la création du compte'))
     } finally {
       setLoading(false)
     }
@@ -162,7 +164,7 @@ export default function Register() {
             <select
               id="role"
               value={formData.role}
-              onChange={(e) => setFormData({ ...formData, role: e.target.value as any })}
+              onChange={(e) => setFormData({ ...formData, role: e.target.value as Role })}
             >
               <option value="operator">Opérateur</option>
               <option value="readonly">Lecture seule</option>

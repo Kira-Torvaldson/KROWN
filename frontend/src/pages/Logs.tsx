@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { apiService } from '../services/api'
 import { FileText, RefreshCw, Download, AlertCircle } from 'lucide-react'
+import { getApiErrorMessage } from '../utils/apiError'
 import './Logs.css'
 
 export default function Logs() {
@@ -18,9 +19,9 @@ export default function Logs() {
     try {
       const response = await apiService.getLogs(lines)
       setLogs(response.logs || [])
-    } catch (error: any) {
-      console.error('Failed to load logs:', error)
-      setError(error.response?.data?.error || 'Erreur lors du chargement des logs')
+    } catch (err: unknown) {
+      console.error('Failed to load logs:', err)
+      setError(getApiErrorMessage(err, 'Erreur lors du chargement des logs'))
     } finally {
       setLoading(false)
     }
@@ -28,13 +29,13 @@ export default function Logs() {
 
   useEffect(() => {
     // Authentication disabled - load logs for all
-    loadLogs()
+    void loadLogs()
   }, [loadLogs])
 
   useEffect(() => {
     if (autoRefresh) {
       const interval = setInterval(() => {
-        loadLogs()
+        void loadLogs()
       }, 5000) // Refresh every 5 seconds
 
       return () => clearInterval(interval)
