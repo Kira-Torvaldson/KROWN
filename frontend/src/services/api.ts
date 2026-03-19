@@ -101,11 +101,11 @@ class ApiService {
       typeof data.port === 'number' && Number.isFinite(data.port)
         ? Math.min(65535, Math.max(1, Math.floor(data.port)))
         : 22
+    // POST /api/sessions : clé uniquement côté politique API (ne jamais envoyer de mot de passe compte SSH).
     const body = {
       host: String(data.host || '').trim(),
       port,
       username: String(data.username || '').trim(),
-      ...(data.password ? { password: data.password } : {}),
       ...(data.private_key ? { private_key: data.private_key } : {}),
       ...(data.passphrase ? { passphrase: data.passphrase } : {}),
     }

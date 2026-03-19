@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import type { CreateSessionRequest, Server } from '../types'
 import { apiService } from '../services/api'
-import { Plus, Edit, Trash2, Terminal, Key } from 'lucide-react'
+import { Plus, Edit, Trash2, Terminal, Key, Lock } from 'lucide-react'
 import { getApiErrorMessage } from '../utils/apiError'
 import './ServerManager.css'
 
@@ -32,21 +32,36 @@ export default function ServerManager() {
   const handleCreateSession = async (server: Server) => {
     setLoading(true)
     try {
+      const method = server.authMethod ?? 'key'
+      if (method === 'password') {
+        alert(
+          'Les sessions SSH utilisent uniquement une clé privée. Ouvrez « Modifier » et configurez une clé SSH (le mot de passe compte n’est pas envoyé à l’API).'
+        )
+        setLoading(false)
+        return
+      }
+
+      if (!server.privateKey?.trim()) {
+        alert('Clé privée SSH requise : modifiez le serveur et collez votre clé privée.')
+        setLoading(false)
+        return
+      }
+
       const requestData: CreateSessionRequest = {
         host: server.host.trim(),
         port: Number(server.port) > 0 && Number(server.port) <= 65535 ? Number(server.port) : 22,
         username: server.username.trim(),
+        private_key: server.privateKey.trim(),
+        ...(server.passphrase?.trim() ? { passphrase: server.passphrase } : {}),
       }
-      
-      if (server.privateKey) requestData.private_key = server.privateKey
-      if (server.passphrase) requestData.passphrase = server.passphrase
-      
+
       const session = await apiService.createSession(requestData)
 
       navigate(`/terminal/${session.id}`)
     } catch (err: unknown) {
-      console.error('Erreur création session:', err)
-      alert(getApiErrorMessage(err, 'Erreur lors de la création de la session'))
+      const msg = getApiErrorMessage(err, 'Erreur lors de la création de la session')
+      console.error('Erreur création session:', msg)
+      alert(msg)
     } finally {
       setLoading(false)
     }
@@ -123,7 +138,15 @@ export default function ServerManager() {
                 <div className="info-row">
                   <span className="info-label">Authentification:</span>
                   <span className="info-value">
-                    <><Key size={14} /> Clé SSH</>
+                    {(server.authMethod ?? 'key') === 'password' ? (
+                      <>
+                        <Lock size={14} /> Mot de passe
+                      </>
+                    ) : (
+                      <>
+                        <Key size={14} /> Clé SSH
+                      </>
+                    )}
                   </span>
                 </div>
               </div>
@@ -180,8 +203,8 @@ function ServerModal({
     host: server?.host || '',
     port: server?.port || 22,
     username: server?.username || '',
-    authMethod: 'key',
-    password: '',
+    authMethod: server?.authMethod === 'password' ? 'password' : 'key',
+    password: server?.password || '',
     privateKey: server?.privateKey || '',
     passphrase: server?.passphrase || '',
   })
@@ -190,6 +213,14 @@ function ServerModal({
     e.preventDefault()
     if (!formData.name || !formData.host || !formData.username) {
       alert('Veuillez remplir tous les champs obligatoires')
+      return
+    }
+    if (formData.authMethod === 'password' && !formData.password?.trim()) {
+      alert('Saisissez le mot de passe SSH')
+      return
+    }
+    if (formData.authMethod === 'key' && !formData.privateKey?.trim()) {
+      alert('Collez votre clé privée SSH')
       return
     }
     onSave(formData)
@@ -243,32 +274,53 @@ function ServerModal({
             />
           </div>
           <div className="form-group">
-            <label>Méthode d'authentification</label>
-            <select value="key" disabled>
+            <label>Méthode d&apos;authentification</label>
+            <select
+              value={formData.authMethod}
+              onChange={(e) =>
+                setFormData({
+                  ...formData,
+                  authMethod: e.target.value === 'password' ? 'password' : 'key',
+                })
+              }
+            >
               <option value="key">Clé SSH privée</option>
+              <option value="password">Mot de passe SSH</option>
             </select>
           </div>
-          <>
+          {formData.authMethod === 'password' ? (
             <div className="form-group">
-              <label>Clé privée SSH *</label>
-              <textarea
-                value={formData.privateKey}
-                onChange={(e) => setFormData({ ...formData, privateKey: e.target.value })}
-                placeholder="-----BEGIN OPENSSH PRIVATE KEY-----..."
-                rows={6}
-                required
-              />
-            </div>
-            <div className="form-group">
-              <label>Passphrase (optionnel)</label>
+              <label>Mot de passe SSH *</label>
               <input
                 type="password"
-                value={formData.passphrase}
-                onChange={(e) => setFormData({ ...formData, passphrase: e.target.value })}
+                value={formData.password}
+                onChange={(e) => setFormData({ ...formData, password: e.target.value })}
                 placeholder="••••••••"
+                autoComplete="off"
               />
             </div>
-          </>
+          ) : (
+            <>
+              <div className="form-group">
+                <label>Clé privée SSH *</label>
+                <textarea
+                  value={formData.privateKey}
+                  onChange={(e) => setFormData({ ...formData, privateKey: e.target.value })}
+                  placeholder="-----BEGIN OPENSSH PRIVATE KEY-----..."
+                  rows={6}
+                />
+              </div>
+              <div className="form-group">
+                <label>Passphrase de la clé (optionnel)</label>
+                <input
+                  type="password"
+                  value={formData.passphrase}
+                  onChange={(e) => setFormData({ ...formData, passphrase: e.target.value })}
+                  placeholder="••••••••"
+                />
+              </div>
+            </>
+          )}
           <div className="modal-actions">
             <button type="button" className="btn-secondary" onClick={onClose}>
               Annuler

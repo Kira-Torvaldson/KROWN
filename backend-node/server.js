@@ -312,7 +312,6 @@ app.post('/api/sessions', async (req, res) => {
             });
         }
 
-        // Politique: authentification par clé uniquement (pas de mot de passe)
         if (!agentClient.isAvailable()) {
             console.warn('[API] Agent indisponible, socket:', AGENT_SOCKET);
             await ensureAgentRunning();
@@ -330,14 +329,31 @@ app.post('/api/sessions', async (req, res) => {
             }
         }
 
-        const pwd =
-            password && String(password).length > 0 ? String(password) : null;
+        const passwordProvided =
+            password != null && String(password).trim().length > 0;
+        if (passwordProvided) {
+            return res.status(400).json({
+                error:
+                    "L'authentification par mot de passe n'est pas prise en charge pour les sessions SSH. Utilisez une clé privée (`private_key`).",
+                stage: 'session_auth_policy',
+            });
+        }
+
+        const privateKeyTrimmed =
+            private_key != null && typeof private_key === 'string' ? private_key.trim() : '';
+        if (!privateKeyTrimmed) {
+            return res.status(400).json({
+                error: 'Clé privée SSH requise (`private_key`, non vide).',
+                stage: 'payload_validation',
+            });
+        }
+
         const result = await agentClient.sshConnect(
             host.trim(),
             p,
             username.trim(),
-            pwd,
-            private_key,
+            null,
+            privateKeyTrimmed,
             passphrase,
         );
 

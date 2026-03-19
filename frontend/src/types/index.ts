@@ -50,8 +50,7 @@ export interface LoginResponse {
   user: User
 }
 
-/** Payload POST /api/sessions (snake_case côté fil JSON, aligné backend) */
-/** POST /api/sessions — mot de passe et/ou clé (selon serveur SSH) */
+/** Payload POST /api/sessions (snake_case JSON). Ne pas envoyer `password` : API sessions = clé uniquement. */
 export interface CreateSessionRequest {
   host: string
   port?: number
