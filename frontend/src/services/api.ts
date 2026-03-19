@@ -40,9 +40,18 @@ class ApiService {
       (response) => response,
       (error) => {
         if (error.response?.status === 401) {
-          localStorage.removeItem('krown_token')
-          localStorage.removeItem('krown_user')
-          window.location.href = '/login'
+          const url = error.config?.url ?? ''
+          const base = error.config?.baseURL ?? ''
+          const path = `${base}${url}`
+          // Les 401 métier SSH (ex. /api/sessions) ne sont pas une session JWT expirée :
+          // laisser l’erreur remonter au composant (alerte, message, etc.).
+          const isApplicationAuthEndpoint =
+            /\/api\/auth(\/|$|\?)/.test(path) || /\/api\/auth(\/|$|\?)/.test(url)
+          if (isApplicationAuthEndpoint) {
+            localStorage.removeItem('krown_token')
+            localStorage.removeItem('krown_user')
+            window.location.href = '/login'
+          }
         }
         return Promise.reject(error)
       }
