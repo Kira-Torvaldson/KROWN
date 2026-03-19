@@ -96,6 +96,7 @@ class ApiService {
       host: String(data.host || '').trim(),
       port,
       username: String(data.username || '').trim(),
+      ...(data.password ? { password: data.password } : {}),
       ...(data.private_key ? { private_key: data.private_key } : {}),
       ...(data.passphrase ? { passphrase: data.passphrase } : {}),
     }

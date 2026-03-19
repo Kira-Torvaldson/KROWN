@@ -288,7 +288,13 @@ app.post('/api/sessions', async (req, res) => {
         const { host, port = 22, username, password, private_key, passphrase } = req.body || {};
 
         if (process.env.KROWN_DEBUG === '1') {
-            console.log('[API] SSH connect attempt:', { host, port, username, hasKey: !!private_key });
+            console.log('[API] SSH connect attempt:', {
+                host,
+                port,
+                username,
+                hasKey: !!private_key,
+                hasPassword: !!(password && String(password).length > 0),
+            });
         }
 
         if (!host || typeof host !== 'string' || !host.trim() || !username || typeof username !== 'string' || !username.trim()) {
@@ -307,17 +313,6 @@ app.post('/api/sessions', async (req, res) => {
         }
 
         // Politique: authentification par clé uniquement (pas de mot de passe)
-        if (password && String(password).length > 0) {
-            return res.status(400).json({
-                error: 'Authentification par mot de passe non supportée. Utilisez une clé SSH (private_key/passphrase) ou une clé locale (ssh-agent).',
-                stage: 'policy_password',
-                details: {
-                    remote_agent_install_required: false,
-                    note: 'krown-agent est un daemon local (ou conteneur) et ne s’installe pas sur la machine SSH distante.',
-                },
-            });
-        }
-
         if (!agentClient.isAvailable()) {
             console.warn('[API] Agent indisponible, socket:', AGENT_SOCKET);
             await ensureAgentRunning();
@@ -335,7 +330,16 @@ app.post('/api/sessions', async (req, res) => {
             }
         }
 
-        const result = await agentClient.sshConnect(host.trim(), p, username.trim(), null, private_key, passphrase);
+        const pwd =
+            password && String(password).length > 0 ? String(password) : null;
+        const result = await agentClient.sshConnect(
+            host.trim(),
+            p,
+            username.trim(),
+            pwd,
+            private_key,
+            passphrase,
+        );
 
         if (result.code === 0) {
             const agentData = result.data || {};

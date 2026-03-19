@@ -56,14 +56,14 @@ async function main() {
       throw new Error(`Attendu stage payload_validation, reçu ${invalid.json.stage}`)
     }
 
-    // 2) Mot de passe refusé -> 400 policy_password (pas de fuite du secret dans la réponse)
+    // 2) Mot de passe seul accepté côté API (pas 400 policy) — réponse agent/réseau, pas echo du secret
     const pwd = await postJson('/api/sessions', {
       host: 'h.example',
       username: 'u',
       password: 'secret-password-never-echo',
     })
-    if (pwd.status !== 400 || pwd.json?.stage !== 'policy_password') {
-      throw new Error(`Attendu 400 policy_password pour password, reçu ${pwd.status} ${JSON.stringify(pwd.json)}`)
+    if (pwd.status === 400 && pwd.json?.stage === 'policy_password') {
+      throw new Error('Le mot de passe ne doit plus être rejeté par policy (auth supportée)')
     }
     if (JSON.stringify(pwd.json).includes('secret-password')) {
       throw new Error('Le mot de passe ne doit pas être renvoyé dans le JSON')

@@ -225,19 +225,10 @@ response_code_t handle_ssh_connect(const char *json_data, char **response) {
     if (port_obj) port = json_object_get_int(port_obj);
     if (pass_obj) {
         password = json_object_get_string(pass_obj);
-        printf("[SSH] Mot de passe fourni: %s\n", (password && password[0]) ? "oui (refusé)" : "vide");
     }
     if (key_obj) private_key = json_object_get_string(key_obj);
     if (passphrase_obj) {
         passphrase = json_object_get_string(passphrase_obj);
-        printf("[SSH] Passphrase reçue (longueur: %zu)\n", passphrase ? strlen(passphrase) : 0);
-    }
-
-    // Politique: authentification par clé uniquement (pas de mot de passe)
-    if (password && password[0] != '\0') {
-        json_object_put(root);
-        *response = json_error("Authentification par mot de passe non supportée (clé SSH uniquement).");
-        return RESP_SSH_ERROR;
     }
 
     // Créer la session SSH
@@ -280,31 +271,23 @@ response_code_t handle_ssh_connect(const char *json_data, char **response) {
         return RESP_SSH_ERROR;
     }
 
-    // Authentification (clé uniquement)
-    printf("[SSH] Tentative d'authentification pour %s@%s:%d\n", username, host, port);
-    
-    // Amorcer la phase d'auth
+    bool have_key = (private_key && private_key[0] != '\0');
+    bool have_pass = (password && password[0] != '\0');
+
+    printf("[SSH] Authentification %s@%s:%d — credential key=%s password=%s\n",
+           username, host, port,
+           have_key ? "yes" : "no",
+           have_pass ? "yes" : "no");
+
     (void)ssh_userauth_none(session, NULL);
     int auth_methods = ssh_userauth_list(session, NULL);
-    printf("[SSH] Méthodes d'authentification disponibles: ");
-    if (auth_methods & SSH_AUTH_METHOD_PUBLICKEY) printf("publickey ");
-    if (auth_methods & SSH_AUTH_METHOD_PASSWORD) printf("password ");
-    if (auth_methods & SSH_AUTH_METHOD_HOSTBASED) printf("hostbased ");
-    if (auth_methods & SSH_AUTH_METHOD_INTERACTIVE) printf("keyboard-interactive ");
-    printf("\n");
-    
-    if (private_key && strlen(private_key) > 0) {
-        printf("[SSH] Méthode: clé privée (longueur: %zu)\n", strlen(private_key));
-        
-        // Vérifier que le serveur accepte l'authentification par clé publique
-        if (!(auth_methods & SSH_AUTH_METHOD_PUBLICKEY)) {
-            printf("[SSH] ERREUR: Le serveur n'accepte pas l'authentification par clé publique\n");
-            *response = json_error("Le serveur SSH n'accepte pas l'authentification par clé publique");
-            ssh_disconnect(session);
-            ssh_free(session);
-            json_object_put(root);
-            return RESP_SSH_ERROR;
-        }
+    printf("[SSH] Méthodes serveur: publickey=%d password=%d keyboard-interactive=%d\n",
+           !!(auth_methods & SSH_AUTH_METHOD_PUBLICKEY),
+           !!(auth_methods & SSH_AUTH_METHOD_PASSWORD),
+           !!(auth_methods & SSH_AUTH_METHOD_INTERACTIVE));
+
+    if (have_key && (auth_methods & SSH_AUTH_METHOD_PUBLICKEY)) {
+        printf("[SSH] auth: tentative clé privée inline\n");
         
         // Créer un fichier temporaire pour la clé privée
         char tmp_key_file[] = "/tmp/krown_ssh_key_XXXXXX";
@@ -408,15 +391,30 @@ response_code_t handle_ssh_connect(const char *json_data, char **response) {
                 printf("[SSH] Erreur lors de l'authentification - vérifiez les logs du serveur SSH\n");
             }
         }
-    } else {
-        printf("[SSH] Méthode: clé publique automatique (ssh-agent/keys locales)\n");
+    } else if (have_key && !(auth_methods & SSH_AUTH_METHOD_PUBLICKEY)) {
+        printf("[SSH] auth: clé fournie mais serveur sans publickey — saut (mot de passe peut suivre)\n");
+        rc = SSH_AUTH_DENIED;
+    } else if (!have_pass) {
+        printf("[SSH] auth: publickey_auto (ssh-agent / clés locales)\n");
         rc = ssh_userauth_publickey_auto(session, NULL, NULL);
-        
         if (rc == SSH_AUTH_SUCCESS) {
-            printf("[SSH] Authentification par clé publique réussie\n");
+            printf("[SSH] Authentification publickey_auto réussie\n");
         } else {
-            printf("[SSH] Échec authentification par clé publique: %s (code: %d)\n", 
-                   ssh_get_error(session), rc);
+            printf("[SSH] Échec publickey_auto: %s (code: %d)\n", ssh_get_error(session), rc);
+        }
+    } else {
+        printf("[SSH] auth: mot de passe seul (pas de clé inline)\n");
+        rc = SSH_AUTH_DENIED;
+    }
+
+    if (rc != SSH_AUTH_SUCCESS && have_pass) {
+        (void)ssh_userauth_list(session, NULL);
+        printf("[SSH] auth: tentative mot de passe utilisateur\n");
+        rc = ssh_userauth_password(session, NULL, password);
+        if (rc == SSH_AUTH_SUCCESS) {
+            printf("[SSH] auth: mot de passe accepté\n");
+        } else {
+            printf("[SSH] auth: mot de passe refusé (code %d)\n", rc);
         }
     }
 

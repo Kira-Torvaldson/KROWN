@@ -328,12 +328,11 @@ curl http://localhost:8080/api/health
 curl http://localhost:8080/api/ping
 ```
 
-#### Créer une session SSH (clé uniquement)
+#### Créer une session SSH (mot de passe et/ou clé)
 
-Krown **n'autorise pas** l'authentification par mot de passe : utilisez une clé privée (`private_key`) + optionnellement `passphrase`,
-ou laissez l'agent utiliser les clés disponibles localement (ssh-agent / clés locales) si aucune clé explicite n'est fournie.
+L’API accepte **`password`**, **`private_key`** (+ `passphrase` si besoin), ou **les deux** : l’agent tente d’abord la clé inline si fournie, puis le mot de passe si l’auth n’a pas réussi. Sans les deux, l’agent peut utiliser **publickey_auto** (ssh-agent / clés locales).
 
-**Avec authentification par clé SSH privée :**
+**Exemple avec clé SSH privée :**
 ```bash
 curl -X POST http://localhost:8080/api/sessions \
   -H "Content-Type: application/json" \
@@ -508,7 +507,7 @@ Le frontend React est disponible sur `http://localhost:3000` (ou `https://localh
 #### Fonctionnalités
 
 - **Gestion des serveurs SSH** : Ajouter, modifier, supprimer des serveurs
-- **Authentification** : Clé SSH privée (mot de passe SSH non pris en charge par l’API)
+- **Authentification** : Mot de passe SSH et/ou clé privée (`POST /api/sessions`)
 - **Sessions SSH** : Connexion en un clic
 - **Terminal interactif** : Shell PTY distant via WebSocket (`/api/ssh/:id/stream`) + xterm.js
 - **REST execute** : Commandes ponctuelles avec sortie `output` / `stderr` (mappée `stdout` côté client)
@@ -650,11 +649,10 @@ docker compose up -d agent
 docker compose logs agent | grep SSH
 ```
 
-Les logs affichent maintenant :
-- La méthode d'authentification utilisée
+Les logs affichent notamment :
+- Présence ou non des identifiants (mot de passe / clé), **sans jamais les valeurs**
 - Les méthodes disponibles sur le serveur SSH
-- Le code d'erreur exact
-- La longueur du mot de passe/clé reçue
+- Le code d'erreur d'authentification
 
 **Causes possibles :**
 - Mot de passe incorrect
