@@ -173,6 +173,7 @@ async function runTerminalPtySession(ws, sessionId) {
         void cleanup();
     });
 
+    // timeout de test PTY init (2 min)
     initTimer = setTimeout(() => {
         if (!shellReady && ws.readyState === 1) {
             ws.send(JSON.stringify({
@@ -182,7 +183,7 @@ async function runTerminalPtySession(ws, sessionId) {
             }));
             ws.close();
         }
-    }, 8000);
+    }, 120000);
 }
 
 attachTerminalStreamUpgrade(httpServer);
@@ -212,7 +213,7 @@ async function ensureAgentRunning() {
         console.log('[API] Agent non détecté, tentative de démarrage...');
         
         // En Docker, l'agent est un service séparé, ne pas essayer de le démarrer
-        if (process.env.NODE_ENV === 'production' || process.env.DOCKER === 'true') {
+        if (process.env.DOCKER === 'true') {
             console.log('[API] Mode Docker détecté, l\'agent doit être démarré séparément');
             console.log('[API] Attente de l\'agent...');
             
@@ -329,21 +330,15 @@ app.post('/api/sessions', async (req, res) => {
             }
         }
 
-        const passwordProvided =
-            password != null && String(password).trim().length > 0;
-        if (passwordProvided) {
-            return res.status(400).json({
-                error:
-                    "L'authentification par mot de passe n'est pas prise en charge pour les sessions SSH. Utilisez une clé privée (`private_key`).",
-                stage: 'session_auth_policy',
-            });
-        }
-
+        const pwd =
+            password != null && String(password).trim().length > 0 ? String(password).trim() : null;
         const privateKeyTrimmed =
             private_key != null && typeof private_key === 'string' ? private_key.trim() : '';
-        if (!privateKeyTrimmed) {
+
+        // Sessions SSH : support password-only / key-only / password+key
+        if (!pwd && !privateKeyTrimmed) {
             return res.status(400).json({
-                error: 'Clé privée SSH requise (`private_key`, non vide).',
+                error: 'Fournissez au moins un mot de passe SSH (`password`) ou une clé privée (`private_key`, non vide).',
                 stage: 'payload_validation',
             });
         }
@@ -352,8 +347,8 @@ app.post('/api/sessions', async (req, res) => {
             host.trim(),
             p,
             username.trim(),
-            null,
-            privateKeyTrimmed,
+            pwd,
+            privateKeyTrimmed || undefined,
             passphrase,
         );
 
@@ -519,7 +514,7 @@ app.get('/api/logs/agent', async (req, res) => {
         const lines = parseInt(req.query.lines) || 100;
         
         // En Docker, récupérer les logs du conteneur
-        if (process.env.DOCKER === 'true' || process.env.NODE_ENV === 'production') {
+        if (process.env.DOCKER === 'true') {
             try {
                 const { stdout, stderr } = await execAsync(`docker logs --tail ${lines} krown-agent 2>&1 || echo "Conteneur non trouvé"`);
                 const logs = (stdout || stderr || '').trim();
@@ -576,7 +571,7 @@ app.get('/api/logs/backend', async (req, res) => {
         const lines = parseInt(req.query.lines) || 100;
         
         // En Docker, récupérer les logs du conteneur
-        if (process.env.DOCKER === 'true' || process.env.NODE_ENV === 'production') {
+        if (process.env.DOCKER === 'true') {
             try {
                 const { stdout, stderr } = await execAsync(`docker logs --tail ${lines} krown-api 2>&1 || echo ""`);
                 const logs = (stdout || stderr || '').trim();
@@ -618,7 +613,7 @@ app.get('/api/logs', async (req, res) => {
         
         // Logs agent
         try {
-            if (process.env.DOCKER === 'true' || process.env.NODE_ENV === 'production') {
+            if (process.env.DOCKER === 'true') {
                 const { stdout } = await execAsync(`docker logs --tail ${lines} krown-agent 2>&1 || echo ""`);
                 agentData.logs = (stdout || '').split('\n').filter(line => line.trim().length > 0);
                 agentData.source = 'docker';
@@ -629,7 +624,7 @@ app.get('/api/logs', async (req, res) => {
         
         // Logs backend
         try {
-            if (process.env.DOCKER === 'true' || process.env.NODE_ENV === 'production') {
+            if (process.env.DOCKER === 'true') {
                 const { stdout } = await execAsync(`docker logs --tail ${lines} krown-api 2>&1 || echo ""`);
                 backendData.logs = (stdout || '').split('\n').filter(line => line.trim().length > 0);
                 backendData.source = 'docker';

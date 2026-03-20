@@ -33,16 +33,15 @@ export default function ServerManager() {
     setLoading(true)
     try {
       const method = server.authMethod ?? 'key'
-      if (method === 'password') {
-        alert(
-          'Les sessions SSH utilisent uniquement une clé privée. Ouvrez « Modifier » et configurez une clé SSH (le mot de passe compte n’est pas envoyé à l’API).'
-        )
+      const pwd = server.password?.trim()
+      const key = server.privateKey?.trim()
+      if (method === 'password' && !pwd) {
+        alert('Saisissez le mot de passe SSH (modifier le serveur si besoin).')
         setLoading(false)
         return
       }
-
-      if (!server.privateKey?.trim()) {
-        alert('Clé privée SSH requise : modifiez le serveur et collez votre clé privée.')
+      if (method === 'key' && !key) {
+        alert('Collez votre clé privée SSH (modifier le serveur si besoin).')
         setLoading(false)
         return
       }
@@ -51,7 +50,8 @@ export default function ServerManager() {
         host: server.host.trim(),
         port: Number(server.port) > 0 && Number(server.port) <= 65535 ? Number(server.port) : 22,
         username: server.username.trim(),
-        private_key: server.privateKey.trim(),
+        ...(pwd ? { password: pwd } : {}),
+        ...(key ? { private_key: key } : {}),
         ...(server.passphrase?.trim() ? { passphrase: server.passphrase } : {}),
       }
 

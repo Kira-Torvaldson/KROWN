@@ -18,6 +18,11 @@
 #include "ssh_handler.h"
 #include "agent.h"
 
+/* libssh : keyboard-interactive est exposé comme SSH_AUTH_METHOD_INTERACTIVE */
+#ifndef SSH_AUTH_METHOD_KBDINT
+#define SSH_AUTH_METHOD_KBDINT SSH_AUTH_METHOD_INTERACTIVE
+#endif
+
 #define MAX_SESSIONS 100
 // Protection mémoire : limite dure de sortie par flux
 #define MAX_EXEC_STDOUT (256 * 1024)
@@ -194,6 +199,160 @@ void ssh_handler_cleanup(void) {
 }
 
 /**
+ * Détermine si l'invite kbdint attend le mot de passe compte (sans jamais logger le secret).
+ */
+static int kbdint_prompt_wants_password(const char *prompt, char echo, int nprompts, int idx) {
+    if (echo == 0)
+        return 1;
+    if (nprompts == 1)
+        return 1;
+    if (!prompt || !prompt[0])
+        return 1;
+    char buf[256];
+    size_t k = 0;
+    for (const unsigned char *s = (const unsigned char *)prompt; *s && k + 1 < sizeof buf; s++) {
+        unsigned char c = *s;
+        if (c >= 'A' && c <= 'Z')
+            c = (unsigned char)(c + 32);
+        buf[k++] = (char)c;
+    }
+    buf[k] = '\0';
+    if (strstr(buf, "password") != NULL || strstr(buf, "passphrase") != NULL)
+        return 1;
+    /* "mot de passe" en minuscules ASCII */
+    if (strstr(buf, "mot de passe") != NULL)
+        return 1;
+    (void)idx;
+    return 0;
+}
+
+/**
+ * Keyboard-interactive : répond aux invites avec le mot de passe API (synchrone).
+ * Boucle correcte libssh : ssh_userauth_kbdint jusqu'à SSH_AUTH_INFO, puis getnprompts/setanswer
+ * (getnprompts > 0 seul, sans kbdint, n'est pas valide).
+ */
+static int ssh_try_kbdint_password(ssh_session session, const char *password) {
+    int rc;
+    fprintf(stderr, "[SSH] auth(stderr): ssh_try_kbdint_password — début (ssh_userauth_kbdint + boucle INFO)\n");
+    printf("[SSH] auth: keyboard-interactive\n");
+    while ((rc = ssh_userauth_kbdint(session, NULL, NULL)) == SSH_AUTH_INFO) {
+        int n = ssh_userauth_kbdint_getnprompts(session);
+        if (n <= 0) {
+            fprintf(stderr, "[SSH] auth(stderr): kbdint: aucune invite (n=%d)\n", n);
+            printf("[SSH] auth: kbdint sans invites\n");
+            return SSH_AUTH_ERROR;
+        }
+        fprintf(stderr, "[SSH] auth(stderr): kbdint: %d invite(s) à traiter\n", n);
+        for (int i = 0; i < n; i++) {
+            char echo = 0;
+            const char *prompt = ssh_userauth_kbdint_getprompt(session, (unsigned int)i, &echo);
+            int use_pw = kbdint_prompt_wants_password(prompt, echo, n, i);
+            const char *answer = use_pw ? password : "";
+            fprintf(stderr,
+                    "[SSH] auth(stderr): kbdint prompt[%d] echo=%d use_password=%d (texte invite non loggé)\n",
+                    i, (int)echo, use_pw);
+            if (ssh_userauth_kbdint_setanswer(session, i, answer) < 0) {
+                fprintf(stderr, "[SSH] auth(stderr): kbdint setanswer erreur à l'invite %d\n", i);
+                printf("[SSH] auth: kbdint setanswer erreur\n");
+                return SSH_AUTH_ERROR;
+            }
+        }
+    }
+    if (rc == SSH_AUTH_SUCCESS) {
+        fprintf(stderr, "[SSH] auth(stderr): kbdint terminé avec succès\n");
+        printf("[SSH] auth: keyboard-interactive réussi\n");
+    } else {
+        fprintf(stderr, "[SSH] auth(stderr): kbdint fin code=%d\n", rc);
+        printf("[SSH] auth: keyboard-interactive fin (code %d)\n", rc);
+    }
+    return rc;
+}
+
+/**
+ * Mot de passe compte : 1) ssh_userauth_password, 2) si DENIED/PARTIAL et KBDINT annoncé, keyboard-interactive.
+ * NULL pour username/liste : libssh utilise l'utilisateur défini sur la session (SSH_OPTIONS_USER).
+ * La session reste connectée entre les deux tentatives (pas de ssh_disconnect ici).
+ */
+static int ssh_try_user_password_methods(ssh_session session, const char *username,
+                                         const char *password) {
+    (void)username;
+
+    int methods = ssh_userauth_list(session, NULL);
+    if (methods < 0) {
+        printf("[SSH] auth: ssh_userauth_list échoué (%d)\n", methods);
+        return SSH_AUTH_ERROR;
+    }
+    printf("[SSH] auth: annonces password=%d keyboard-interactive(kbdint)=%d\n",
+           !!(methods & SSH_AUTH_METHOD_PASSWORD),
+           !!(methods & SSH_AUTH_METHOD_KBDINT));
+
+    if (methods & SSH_AUTH_METHOD_PASSWORD) {
+        fprintf(stderr, "[SSH] auth(stderr): 1ère méthode — ssh_userauth_password(session, NULL, …)\n");
+        printf("[SSH] auth: tentative ssh_userauth_password\n");
+        int prc = ssh_userauth_password(session, NULL, password);
+        if (prc == SSH_AUTH_SUCCESS) {
+            fprintf(stderr, "[SSH] auth(stderr): password OK — auth terminée (code 0 côté connect)\n");
+            printf("[SSH] auth: password acceptée\n");
+            printf("[SSH] auth: résultat final succès (password)\n");
+            return prc;
+        }
+
+        printf("[SSH] auth: password refusée ou partielle (code %d)\n", prc);
+
+        /* Pas d'erreur fatale immédiate : 2e chance si DENIED/PARTIAL et kbdint annoncé après rafraîchissement */
+        if (prc != SSH_AUTH_DENIED && prc != SSH_AUTH_PARTIAL) {
+            fprintf(stderr,
+                    "[SSH] auth(stderr): password rc=%d (ni DENIED ni PARTIAL) — pas de fallback kbdint\n",
+                    prc);
+            printf("[SSH] auth: résultat final code=%d (password)\n", prc);
+            return prc;
+        }
+
+        fprintf(stderr,
+                "[SSH] auth(stderr): password DENIED/PARTIAL — pas d'échec immédiat, ssh_userauth_list(NULL)\n");
+
+        int m_after = ssh_userauth_list(session, NULL);
+        if (m_after < 0) {
+            fprintf(stderr, "[SSH] auth(stderr): ssh_userauth_list post-password échoué (%d)\n", m_after);
+            return prc;
+        }
+
+        fprintf(stderr,
+                "[SSH] auth(stderr): post-password annonces PASSWORD=%d KBDINT=%d\n",
+                !!(m_after & SSH_AUTH_METHOD_PASSWORD),
+                !!(m_after & SSH_AUTH_METHOD_KBDINT));
+
+        if (m_after & SSH_AUTH_METHOD_KBDINT) {
+            fprintf(stderr,
+                    "[SSH] auth(stderr): 2e méthode — fallback keyboard-interactive DÉCLENCHÉ (KBDINT listé)\n");
+            printf("[SSH] auth: tentative keyboard-interactive après échec password\n");
+            int kb = ssh_try_kbdint_password(session, password);
+            printf("[SSH] auth: résultat final après password puis kbdint code=%d\n", kb);
+            return kb;
+        }
+
+        fprintf(stderr,
+                "[SSH] auth(stderr): KBDINT non annoncé après password — les deux voies épuisées (retour prc)\n");
+        printf("[SSH] auth: résultat final code=%d (password, sans kbdint annoncé)\n", prc);
+        return prc;
+    }
+
+    if (methods & SSH_AUTH_METHOD_KBDINT) {
+        fprintf(stderr, "[SSH] auth(stderr): seule méthode utile — keyboard-interactive (pas de password annoncé)\n");
+        printf("[SSH] auth: tentative keyboard-interactive (sans méthode password annoncée)\n");
+        int kb = ssh_try_kbdint_password(session, password);
+        printf("[SSH] auth: résultat final kbdint-seul code=%d\n", kb);
+        return kb;
+    }
+
+    fprintf(stderr, "[SSH] auth(stderr): aucune annonce password/kbdint — dernier recours kbdint\n");
+    printf("[SSH] auth: aucune annonce password ni keyboard-interactive — essai kbdint de secours\n");
+    int krb = ssh_try_kbdint_password(session, password);
+    printf("[SSH] auth: résultat final kbdint-secours code=%d\n", krb);
+    return krb;
+}
+
+/**
  * Gérer la connexion SSH
  */
 response_code_t handle_ssh_connect(const char *json_data, char **response) {
@@ -279,8 +438,8 @@ response_code_t handle_ssh_connect(const char *json_data, char **response) {
            have_key ? "yes" : "no",
            have_pass ? "yes" : "no");
 
-    (void)ssh_userauth_none(session, NULL);
-    int auth_methods = ssh_userauth_list(session, NULL);
+    (void)ssh_userauth_none(session, username);
+    int auth_methods = ssh_userauth_list(session, username);
     printf("[SSH] Méthodes serveur: publickey=%d password=%d keyboard-interactive=%d\n",
            !!(auth_methods & SSH_AUTH_METHOD_PUBLICKEY),
            !!(auth_methods & SSH_AUTH_METHOD_PASSWORD),
@@ -408,20 +567,14 @@ response_code_t handle_ssh_connect(const char *json_data, char **response) {
     }
 
     if (rc != SSH_AUTH_SUCCESS && have_pass) {
-        (void)ssh_userauth_list(session, NULL);
-        printf("[SSH] auth: tentative mot de passe utilisateur\n");
-        rc = ssh_userauth_password(session, NULL, password);
-        if (rc == SSH_AUTH_SUCCESS) {
-            printf("[SSH] auth: mot de passe accepté\n");
-        } else {
-            printf("[SSH] auth: mot de passe refusé (code %d)\n", rc);
-        }
+        printf("[SSH] auth: phase mot de passe utilisateur\n");
+        rc = ssh_try_user_password_methods(session, username, password);
     }
 
     if (rc != SSH_AUTH_SUCCESS) {
         const char *error_str = ssh_get_error(session);
         // Obtenir plus de détails sur l'erreur
-        int auth_methods = ssh_userauth_list(session, NULL);
+        int auth_methods = ssh_userauth_list(session, username);
         json_object *obj = json_object_new_object();
         json_object_object_add(obj, "error", json_object_new_string("Échec authentification SSH"));
         json_object_object_add(obj, "details", json_object_new_string(error_str ? error_str : "unknown"));
@@ -815,10 +968,11 @@ static char *b64_encode(const unsigned char *data, size_t len) {
     return out;
 }
 
-/* Ordre libssh : open_session → request_pty → request_pty_size(cols,rows) → shell/exec */
+/* Ordre libssh : open_session → request_pty → request_pty_size(term,cols,rows) → shell/exec */
 static int open_shell_channel(ssh_session ssh, int cols, int rows,
                               ssh_channel *out_ch, char *which, size_t which_len) {
     const char *try_exec[] = { "bash -l", "bash", "sh -l", "sh" };
+    const char *pty_term = "xterm-256color";
     int cw = cols > 0 ? cols : 80;
     int rh = rows > 0 ? rows : 24;
     for (size_t t = 0; t < sizeof(try_exec) / sizeof(try_exec[0]); t++) {
@@ -833,7 +987,12 @@ static int open_shell_channel(ssh_session ssh, int cols, int rows,
             ssh_channel_free(ch);
             continue;
         }
-        (void)ssh_channel_request_pty_size(ch, cw, rh);
+        if (ssh_channel_request_pty_size(ch, pty_term, cw, rh) != SSH_OK) {
+            printf("[SSH] shell: request_pty_size échoué (%s): %s\n", try_exec[t], ssh_get_error(ssh));
+            ssh_channel_close(ch);
+            ssh_channel_free(ch);
+            continue;
+        }
         if (ssh_channel_request_exec(ch, try_exec[t]) == SSH_OK) {
             *out_ch = ch;
             snprintf(which, which_len, "%s", try_exec[t]);
@@ -853,7 +1012,12 @@ static int open_shell_channel(ssh_session ssh, int cols, int rows,
         ssh_channel_free(ch);
         return -1;
     }
-    (void)ssh_channel_request_pty_size(ch, cw, rh);
+    if (ssh_channel_request_pty_size(ch, pty_term, cw, rh) != SSH_OK) {
+        printf("[SSH] shell: request_pty_size échoué (login_shell): %s\n", ssh_get_error(ssh));
+        ssh_channel_close(ch);
+        ssh_channel_free(ch);
+        return -1;
+    }
     if (ssh_channel_request_shell(ch) == SSH_OK) {
         *out_ch = ch;
         snprintf(which, which_len, "login_shell");

@@ -12,6 +12,8 @@
 #include <pthread.h>
 #include <fcntl.h>
 #include <sys/stat.h>
+#include <arpa/inet.h>
+#include <netinet/in.h>
 #include <endian.h>
 
 #include "socket_server.h"
@@ -119,6 +121,68 @@ int socket_server_accept(int server_fd) {
         return -1;
     }
 
+    return client_fd;
+}
+
+/**
+ * Démarrer un serveur TCP loopback (Windows/Linux) pour éviter les sockets Unix sur Windows.
+ * Bind strict: 127.0.0.1 uniquement.
+ */
+int socket_tcp_server_start(uint16_t port) {
+    int server_fd;
+    struct sockaddr_in addr;
+
+    server_fd = socket(AF_INET, SOCK_STREAM, 0);
+    if (server_fd < 0) {
+        perror("socket(AF_INET)");
+        return -1;
+    }
+
+    int yes = 1;
+    if (setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(yes)) < 0) {
+        perror("setsockopt(SO_REUSEADDR)");
+        close(server_fd);
+        return -1;
+    }
+
+    memset(&addr, 0, sizeof(addr));
+    addr.sin_family = AF_INET;
+    addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK); /* 127.0.0.1 */
+    addr.sin_port = htons(port);
+
+    int flags = fcntl(server_fd, F_GETFL, 0);
+    fcntl(server_fd, F_SETFL, flags | O_NONBLOCK);
+
+    if (bind(server_fd, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
+        perror("bind(TCP loopback)");
+        close(server_fd);
+        return -1;
+    }
+
+    if (listen(server_fd, MAX_CLIENTS) < 0) {
+        perror("listen(TCP loopback)");
+        close(server_fd);
+        return -1;
+    }
+
+    printf("[Socket] TCP loopback démarré sur 127.0.0.1:%u\n", (unsigned)port);
+    return server_fd;
+}
+
+/**
+ * Accepter une nouvelle connexion TCP.
+ */
+int socket_tcp_server_accept(int server_fd) {
+    struct sockaddr_in client_addr;
+    socklen_t client_len = sizeof(client_addr);
+
+    int client_fd = accept(server_fd, (struct sockaddr *)&client_addr, &client_len);
+    if (client_fd < 0) {
+        if (errno != EAGAIN && errno != EWOULDBLOCK && errno != ECONNABORTED) {
+            perror("accept(TCP)");
+        }
+        return -1;
+    }
     return client_fd;
 }
 

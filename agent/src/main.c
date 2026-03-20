@@ -27,6 +27,7 @@
 // Variables globales
 static volatile bool running = true;
 static int server_fd = -1;
+static int tcp_server_fd = -1;
 
 /**
  * Gestionnaire de signal pour arrêt propre
@@ -37,6 +38,9 @@ void signal_handler(int sig) {
         running = false;
         if (server_fd >= 0) {
             close(server_fd);
+        }
+        if (tcp_server_fd >= 0) {
+            close(tcp_server_fd);
         }
     }
 }
@@ -78,6 +82,18 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
+    // Démarrer un serveur TCP loopback en plus (pour connecter depuis Tauri sur Windows).
+    // Port par défaut: 18090. Désactivation possible via KROWN_AGENT_TCP_PORT=0.
+    const char *tcp_port_str = getenv("KROWN_AGENT_TCP_PORT");
+    int tcp_port = tcp_port_str ? atoi(tcp_port_str) : 18090;
+    if (tcp_port > 0) {
+        tcp_server_fd = socket_tcp_server_start((uint16_t)tcp_port);
+        if (tcp_server_fd < 0) {
+            fprintf(stderr, "[Agent] Avertissement: TCP loopback non disponible (port %d)\n", tcp_port);
+            tcp_server_fd = -1;
+        }
+    }
+
     printf("[Agent] Daemon prêt, en attente de commandes...\n");
 
     // Boucle principale avec select() pour éviter les appels accept() inutiles
@@ -86,13 +102,16 @@ int main(int argc, char *argv[]) {
         struct timeval timeout;
         
         FD_ZERO(&read_fds);
-        FD_SET(server_fd, &read_fds);
+        if (server_fd >= 0) FD_SET(server_fd, &read_fds);
+        if (tcp_server_fd >= 0) FD_SET(tcp_server_fd, &read_fds);
         
         // Timeout de 1 seconde pour permettre la vérification de 'running'
         timeout.tv_sec = 1;
         timeout.tv_usec = 0;
         
-        int select_result = select(server_fd + 1, &read_fds, NULL, NULL, &timeout);
+        int nfds = server_fd;
+        if (tcp_server_fd > nfds) nfds = tcp_server_fd;
+        int select_result = select(nfds + 1, &read_fds, NULL, NULL, &timeout);
         
         if (select_result < 0) {
             if (errno == EINTR) {
@@ -110,17 +129,16 @@ int main(int argc, char *argv[]) {
             continue;
         }
         
-        // Une connexion est en attente
-        // Vérifier que le socket est vraiment prêt
-        if (!FD_ISSET(server_fd, &read_fds)) {
-            continue;
+        // Une connexion est en attente (Unix et/ou TCP)
+        int client_fd = -1;
+        if (server_fd >= 0 && FD_ISSET(server_fd, &read_fds)) {
+            client_fd = socket_server_accept(server_fd);
+        } else if (tcp_server_fd >= 0 && FD_ISSET(tcp_server_fd, &read_fds)) {
+            client_fd = socket_tcp_server_accept(tcp_server_fd);
         }
-        
-        int client_fd = socket_server_accept(server_fd);
+
         if (client_fd < 0) {
-            // EAGAIN/EWOULDBLOCK peut se produire si la connexion est fermée
-            // entre select() et accept(), ou dans des cas de race condition
-            // On ignore silencieusement ces erreurs
+            // EAGAIN/EWOULDBLOCK peut se produire entre select() et accept()
             if (errno != EAGAIN && errno != EWOULDBLOCK && errno != ECONNABORTED && running) {
                 perror("[Agent] Erreur accept");
             }
@@ -144,6 +162,9 @@ int main(int argc, char *argv[]) {
     // Nettoyage
     printf("[Agent] Arrêt du daemon...\n");
     socket_server_stop(server_fd, socket_path);
+    if (tcp_server_fd >= 0) {
+        close(tcp_server_fd);
+    }
     ssh_handler_cleanup();
     printf("[Agent] Arrêt terminé\n");
 

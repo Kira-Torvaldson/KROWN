@@ -50,7 +50,7 @@ export interface LoginResponse {
   user: User
 }
 
-/** Payload POST /api/sessions (snake_case JSON). Ne pas envoyer `password` : API sessions = clé uniquement. */
+/** Payload POST /api/sessions (snake_case JSON) : `password` et/ou `private_key` selon l’auth SSH. */
 export interface CreateSessionRequest {
   host: string
   port?: number

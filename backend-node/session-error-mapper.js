@@ -2,6 +2,10 @@
  * Mapping cohérent des réponses agent -> HTTP pour les routes SSH.
  * Codes agent (agent.h): OK=0, ERROR=1, INVALID_CMD=2, SSH_ERROR=3,
  * INVALID_PROTO=4, INVALID_JSON=5, TOO_LARGE=6, IO_ERROR=7
+ *
+ * Note SSH_ERROR (3) : réponse finale pour une commande connect SSH. Le fallback
+ * keyboard-interactive est exécuté entièrement dans l’agent C avant ce code ; ce n’est
+ * pas un état « partiel » que le Node pourrait faire évoluer via la socket.
  */
 
 const AGENT = {
@@ -112,16 +116,26 @@ export function mapAgentResultToHttp(result, options = {}) {
   }
 
   if (code === AGENT.SSH_ERROR) {
-    const { httpStatus, stage } = sshErrorHttpStatusAndStage(errorMsg);
-    return {
-      httpStatus,
-      body: {
-        error: errorMsg,
-        code,
-        stage,
-        ...(details ? { details } : {}),
-      },
+    const plainDetails =
+      typeof raw.details === 'string' && raw.details.length > 0 ? raw.details : '';
+    /* Classer avec error + message libssh (ex. « n'accepte pas … mot de passe ») */
+    const classifyText = `${errorMsg} ${plainDetails}`.trim();
+    const { httpStatus, stage } = sshErrorHttpStatusAndStage(classifyText);
+    const body = {
+      error: errorMsg,
+      code,
+      stage,
     };
+    if (plainDetails) {
+      body.details = plainDetails;
+    }
+    if (typeof raw.auth_code === 'number') {
+      body.auth_code = raw.auth_code;
+    }
+    if (Array.isArray(raw.auth_methods_available)) {
+      body.auth_methods_available = raw.auth_methods_available;
+    }
+    return { httpStatus, body };
   }
 
   if (code === AGENT.ERROR) {
